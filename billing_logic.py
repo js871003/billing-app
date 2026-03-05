@@ -58,6 +58,9 @@ def process_billing(df):
     excluded_dir_count = before - len(df)
 
     def determine_billing(row):
+        # 서비스 종료 → 자동 불가능
+        if row['담당지사'] == '서비스 종료':
+            return '불가능(서비스종료)'
         if row['리포트 전송 여부'] == '미전송':
             return '불가능'
         if row['스토리라인 성공률'] >= THRESHOLD_AUTO_OK:
@@ -77,7 +80,8 @@ def process_billing(df):
         'final_count': len(df),
         'ok_count': (df['과금 가능 여부'] == '가능').sum(),
         'review_count': (df['과금 가능 여부'] == '확인필요').sum(),
-        'fail_count': (df['과금 가능 여부'] == '불가능').sum(),
+        'fail_count': (df['과금 가능 여부'].isin(['불가능', '불가능(서비스종료)'])).sum(),
+        'service_end_count': (df['과금 가능 여부'] == '불가능(서비스종료)').sum(),
     }
 
     review_items = df[df['과금 가능 여부'] == '확인필요'][
