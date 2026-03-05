@@ -10,8 +10,7 @@ from billing_logic import (
     process_billing, assign_prices, create_invoice_excel,
     create_summary_sheet, PRICE_MAP, DEFAULT_1YEAR_SITES
 )
-import subprocess
-import os
+from invoice_pdf import create_invoice_pdf
 
 st.set_page_config(page_title="과금 자동화", page_icon="📊", layout="wide")
 
@@ -144,7 +143,7 @@ with tab1:
 
 # ===== 2단계: 거래명세서 생성 =====
 with tab2:
-    st.subheader("과금 Raw → 거래명세서 PDF")
+    st.subheader("과금 Raw → 거래명세서 PDF / Excel")
 
     # 데이터 소스 선택
     data_source = st.radio(
@@ -198,17 +197,24 @@ with tab2:
                 'email': recipient_email,
             }
 
+            # === Excel 생성 ===
             wb = create_invoice_excel(
                 df_for_invoice,
                 recipient_name=recipient_name,
                 billing_month=billing_month,
                 recipient_info=recipient_info
             )
-
-            # 엑셀 저장
             excel_output = BytesIO()
             wb.save(excel_output)
             excel_output.seek(0)
+
+            # === PDF 생성 ===
+            pdf_output = create_invoice_pdf(
+                df_for_invoice,
+                recipient_name=recipient_name,
+                billing_month=billing_month,
+                recipient_info=recipient_info
+            )
 
             st.divider()
 
@@ -238,13 +244,19 @@ with tab2:
 
             with col1:
                 st.download_button(
+                    label="📥 거래명세서 다운로드 (PDF)",
+                    data=pdf_output,
+                    file_name=f"거래명세서_{billing_month}.pdf",
+                    mime="application/pdf",
+                    type="primary"
+                )
+
+            with col2:
+                st.download_button(
                     label="📥 거래명세서 다운로드 (Excel)",
                     data=excel_output,
                     file_name=f"거래명세서_{billing_month}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
-            with col2:
-                st.info("💡 PDF 변환: 다운로드한 엑셀 파일을 열고 '다른 이름으로 저장 → PDF' 선택")
 
             st.success("✅ 거래명세서 생성 완료!")
