@@ -11,6 +11,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from io import BytesIO
 import calendar
+import os
 
 # 한글 CID 폰트 등록
 pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))  # 명조
@@ -30,15 +31,32 @@ SUPPLIER = {
 }
 
 PRICE_TO_PLAN = {
-    60000: ('Standard', '1~2'),
-    54000: ('Standard', '3'),
-    48000: ('Basic', '1~2'),
-    43200: ('Basic', '3'),
+    60000: ('Standard', '1년'),
+    54000: ('Standard', '3년'),
+    48000: ('Basic', '1년'),
+    43200: ('Basic', '3년'),
 }
 
 
 def _fmt(n):
     return f"{int(n):,}"
+
+
+def _draw_stamp(c, cx, cy, size=38):
+    """
+    도장 이미지를 PDF에 삽입
+    cx, cy: 도장 중심 좌표
+    size: 도장 크기 (가로=세로)
+    """
+    stamp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stamp.png')
+    if os.path.exists(stamp_path):
+        c.drawImage(stamp_path, cx - size/2, cy - size/2, size, size, mask='auto')
+    else:
+        # fallback: (인) 텍스트
+        c.setFont(FONT_G, 9)
+        c.setFillColorRGB(0.85, 0.1, 0.1)
+        c.drawCentredString(cx, cy - 4, '(인)')
+        c.setFillColorRGB(0, 0, 0)
 
 
 def _draw_cell(c, x, y, w, h, text='', font=FONT_G, size=9,
@@ -166,7 +184,9 @@ def create_invoice_pdf(df_raw, recipient_name, billing_month, recipient_info=Non
     _draw_cell(c, val_x, ry, mid - val_x, rh, SUPPLIER['company'], font=FONT_M, size=10)
     _draw_cell(c, mid, ry, rep_lbl - mid, rh, '대표자', size=9)
     _draw_cell(c, rep_lbl, ry, RM - rep_lbl, rh,
-               f'{SUPPLIER["ceo"]}   (인)', font=FONT_M, size=10, align='left')
+               f'{SUPPLIER["ceo"]}', font=FONT_M, size=10, align='left')
+    # 도장 찍기 (대표자 이름 오른쪽)
+    _draw_stamp(c, RM - 24, ry + rh / 2, size=38)
 
     # R3: 전화번호
     ry = st - rh * 3
