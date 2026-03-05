@@ -30,8 +30,44 @@ PRICE_MAP = {
     ('주3회', '3년'): 43200,
 }
 
-# 1년 약정 기관 사이트아이디 목록 (기본값, 웹에서 수정 가능)
-DEFAULT_1YEAR_SITES = []
+# 1년 약정 기관 사이트아이디 목록 (신규 기관은 전부 3년, 여기 목록만 1년)
+DEFAULT_1YEAR_SITES = [
+    'aipyeonhan_1x1', 'aipyeonhan_1x6',
+    'centralkkum_1x2', 'cheongsol_1x4',
+    'chungmu_1x1', 'chungmu_2x1', 'chungmu_2x3',
+    'dasom_1x1', 'dasom_2x2',
+    'gapogeumho_1x2', 'gapogeumho_1x3',
+    'gapoyubora_1x4',
+    'globalai_1x1', 'globalai_1x2', 'globalai_2x1', 'globalai_2x2',
+    'godeunghaengbok_1x1', 'godeunghaengbok_1x2',
+    'haengbokanai_1x1',
+    'haneulchaefirst2_1x2', 'haneulchaefirst2_1x5', 'haneulchaefirst_1x5',
+    'hillsai_1x1', 'hillsai_1x5', 'hillspark_1x3',
+    'hwaseoildong_2x1',
+    'hyeondongsup_1x1', 'hyeondongsup_1x3',
+    'ipark2_1x4', 'ipark2_1x5', 'iparkcastle_1x6',
+    'jinhaejoy_1x10', 'jinhaejoy_1x2', 'jinhaejoy_1x3', 'jinhaejoy_1x7', 'jinhaejoy_1x9',
+    'jungheungnuribom_1x7', 'jungheungnuribom_1x8',
+    'jungheungs_1x3', 'jungheungs_1x4',
+    'kinderheim_1x4',
+    'kkume_1x1',
+    'littleforest_1x3', 'littleforest_1x4', 'littleforest_1x5',
+    'masanjoy_1x2', 'masanjoy_2x2', 'masanjoy_2x3', 'masanjoy_2x4',
+    'metroseokjeon_1x4', 'metroseokjeon_1x5',
+    'nuribom_2x1', 'nuribom_2x2', 'nuribom_3x1', 'nuribom_4x1', 'nuribom_4x2',
+    'pajang_1x2', 'pajang_1x3', 'pajang_2x1', 'pajang_2x2', 'pajang_2x3',
+    'poseung_1x4',
+    'regencyvill_1x1', 'regencyvill_1x2',
+    'saebitdetre_491',
+    'seongnamsup_3x1', 'seongnamsup_3x2',
+    'seosin_1x3',
+    'seulgiroun_1x3', 'seulgiroun_1x5',
+    'siyeon_1x2', 'siyeon_1x5',
+    'skoceanview_1x1',
+    'tapgoeul_2x3',
+    'uriaideul_2x1', 'uriaideul_2x2', 'uriaideul_2x3', 'uriaideul_2x4',
+    'vision_1x5',
+]
 
 # ========== 공급자 정보 (고정) ==========
 SUPPLIER_INFO = {
