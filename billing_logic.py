@@ -46,6 +46,8 @@ SUPPLIER_INFO = {
 
 def process_billing(df):
     """1단계: 과금 Raw 생성"""
+    # 컬럼명 공백 제거
+    df.columns = df.columns.str.strip()
     original_count = len(df)
 
     df = df[~df['담당지사'].isin(EXCLUDED_JISA)].copy()

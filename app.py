@@ -80,6 +80,15 @@ with tab1:
 
         if st.button("🚀 과금 Raw 생성", type="primary"):
             df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+            df.columns = df.columns.str.strip()
+
+            # 필수 컬럼 확인
+            required_cols = ['담당지사', '기관명', '스토리라인 성공률', '요금제', '리포트 전송 여부']
+            missing = [c for c in required_cols if c not in df.columns]
+            if missing:
+                st.error(f"❌ 필수 컬럼이 없습니다: {', '.join(missing)}\n\n현재 컬럼: {', '.join(df.columns)}")
+                st.stop()
+
             result_df, stats, review_items = process_billing(df)
 
             # 요금 할당
