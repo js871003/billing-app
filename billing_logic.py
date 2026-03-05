@@ -141,10 +141,10 @@ def create_invoice_excel(df_raw, recipient_name, billing_month, recipient_info=N
 
     # 요금제/약정 매핑
     price_to_plan = {
-        60000: ('Standard', '1~2'),
-        54000: ('Standard', 3),
-        48000: ('Basic', '1~2'),
-        43200: ('Basic', 3),
+        60000: ('Standard', '1년'),
+        54000: ('Standard', '3년'),
+        48000: ('Basic', '1년'),
+        43200: ('Basic', '3년'),
     }
 
     wb = Workbook()
@@ -517,3 +517,124 @@ def create_summary_sheet(df_raw):
     pivot = pd.concat([pivot, pd.DataFrame([vat_row])])
 
     return pivot
+
+
+def create_detail_excel(df_raw, billing_month):
+    """
+    별도 제공자료 엑셀 생성 (요약 시트 + Raw 시트)
+
+    Parameters:
+        df_raw: 과금 Raw DataFrame (요금 포함)
+        billing_month: 이용월 (예: "26.01" → 시트명 Raw_2601)
+    """
+    wb = Workbook()
+
+    # ===== 시트1: 요약 =====
+    ws_summary = wb.active
+    ws_summary.title = '요약'
+
+    billing_ok = df_raw[df_raw['과금 가능 여부'] == '가능'].copy()
+
+    # 카테고리 분류
+    def categorize(row):
+        if row['요금'] in [54000, 60000]:
+            return '스탠다드'
+        elif row['요금'] in [43200, 48000]:
+            return '베이직'
+        return '기타'
+
+    billing_ok['카테고리'] = billing_ok.apply(categorize, axis=1)
+
+    pivot = billing_ok.pivot_table(
+        values='요금', index='담당지사', columns='카테고리',
+        aggfunc='sum', fill_value=0
+    )
+
+    if '베이직' not in pivot.columns:
+        pivot['베이직'] = 0
+    if '스탠다드' not in pivot.columns:
+        pivot['스탠다드'] = 0
+
+    pivot['Grand Total'] = pivot.sum(axis=1)
+    pivot = pivot[['베이직', '스탠다드', 'Grand Total']]
+    pivot = pivot.sort_index()
+
+    # 헤더 스타일
+    header_font = Font(name='Dotum', size=11, bold=True)
+    data_font = Font(name='Dotum', size=10)
+    num_fmt = '#,##0'
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    center = Alignment(horizontal='center', vertical='center')
+    right_align = Alignment(horizontal='right', vertical='center')
+
+    # 헤더 작성
+    headers = ['담당지사', '베이직', '스탠다드', 'Grand Total']
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws_summary.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.border = thin_border
+        cell.alignment = center
+
+    # 데이터 작성
+    for row_idx, (jisa, row_data) in enumerate(pivot.iterrows(), 2):
+        cell = ws_summary.cell(row=row_idx, column=1, value=jisa)
+        cell.font = data_font
+        cell.border = thin_border
+
+        for col_idx, col_name in enumerate(['베이직', '스탠다드', 'Grand Total'], 2):
+            val = row_data.get(col_name, 0)
+            cell = ws_summary.cell(row=row_idx, column=col_idx, value=val if val != 0 else None)
+            cell.font = data_font
+            cell.border = thin_border
+            cell.alignment = right_align
+            if val != 0:
+                cell.number_format = num_fmt
+
+    # 열 너비
+    ws_summary.column_dimensions['A'].width = 20
+    ws_summary.column_dimensions['B'].width = 15
+    ws_summary.column_dimensions['C'].width = 15
+    ws_summary.column_dimensions['D'].width = 15
+
+    # ===== 시트2: Raw 데이터 =====
+    month_code = billing_month.replace('.', '')
+    raw_sheet_name = f'Raw_{month_code}'
+    ws_raw = wb.create_sheet(title=raw_sheet_name)
+
+    # Raw 컬럼 정의
+    raw_columns = [
+        '사이트아이디', '기관명', '반명', '가능한 일자 수', '성공 일자 수',
+        '스토리라인 성공률', '담당지사', '요금제', '리포트 전송 여부',
+        '과금 가능 여부', '요금', '서비스', '비고'
+    ]
+
+    # 헤더
+    for col_idx, h in enumerate(raw_columns, 1):
+        cell = ws_raw.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.border = thin_border
+        cell.alignment = center
+
+    # 데이터 (과금 가능한 건만)
+    for row_idx, (_, row) in enumerate(billing_ok.iterrows(), 2):
+        for col_idx, col_name in enumerate(raw_columns, 1):
+            val = row.get(col_name, '')
+            if pd.isna(val):
+                val = ''
+            cell = ws_raw.cell(row=row_idx, column=col_idx, value=val)
+            cell.font = data_font
+            cell.border = thin_border
+            if col_name == '스토리라인 성공률' and isinstance(val, (int, float)):
+                cell.number_format = '0.0000'
+            elif col_name == '요금' and isinstance(val, (int, float)):
+                cell.number_format = num_fmt
+
+    # 열 너비 자동조절
+    col_widths = [18, 15, 12, 12, 12, 15, 15, 10, 12, 12, 12, 10, 10]
+    for i, w in enumerate(col_widths):
+        ws_raw.column_dimensions[get_column_letter(i + 1)].width = w
+
+    return wb
