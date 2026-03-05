@@ -24,6 +24,27 @@ if 'billing_raw' not in st.session_state:
     st.session_state.billing_raw = None
 if 'selected_sheet' not in st.session_state:
     st.session_state.selected_sheet = None
+if 'stats' not in st.session_state:
+    st.session_state.stats = None
+if 'generated' not in st.session_state:
+    st.session_state.generated = False
+
+
+def update_review_item(idx, decision):
+    """확인필요 항목의 과금 가능 여부를 업데이트하고 요금 재계산"""
+    df = st.session_state.billing_raw
+    df.loc[idx, '과금 가능 여부'] = decision
+    # 가능으로 변경 시 요금 재할당, 불가능이면 0
+    if decision == '가능':
+        one_year_sites = st.session_state.get('one_year_sites', [])
+        one_year_set = set(one_year_sites)
+        row = df.loc[idx]
+        contract = '1년' if row.get('사이트아이디', '') in one_year_set else '3년'
+        plan = row.get('요금제', '')
+        df.loc[idx, '요금'] = PRICE_MAP.get((plan, contract), 0)
+    else:
+        df.loc[idx, '요금'] = 0
+    st.session_state.billing_raw = df
 
 
 # ===== 1단계: 과금 Raw 생성 =====
@@ -55,6 +76,7 @@ with tab1:
                 help="예: koreauniv_316"
             )
             one_year_sites = [s.strip() for s in one_year_text.split('\n') if s.strip()]
+            st.session_state['one_year_sites'] = one_year_sites
 
         if st.button("🚀 과금 Raw 생성", type="primary"):
             df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
@@ -63,82 +85,143 @@ with tab1:
             # 요금 할당
             result_df = assign_prices(result_df, one_year_sites)
 
-            # 세션에 저장 (2단계에서 사용)
+            # 세션에 저장
             st.session_state.billing_raw = result_df
             st.session_state.selected_sheet = selected_sheet
+            st.session_state.stats = stats
+            st.session_state.generated = True
 
-            # 결과 요약
+    # ===== 결과 표시 (세션 상태 기반) =====
+    if st.session_state.generated and st.session_state.billing_raw is not None:
+        result_df = st.session_state.billing_raw
+        selected_sheet = st.session_state.selected_sheet
+
+        # 실시간 통계 계산
+        ok_count = (result_df['과금 가능 여부'] == '가능').sum()
+        review_count = (result_df['과금 가능 여부'] == '확인필요').sum()
+        fail_count = (result_df['과금 가능 여부'].isin(['불가능', '불가능(서비스종료)'])).sum()
+        service_end_count = (result_df['과금 가능 여부'] == '불가능(서비스종료)').sum()
+        original_count = st.session_state.stats['original_count']
+
+        st.divider()
+        st.subheader("결과 요약")
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("원본", f"{original_count}건")
+        col2.metric("가능", f"{ok_count}건")
+        col3.metric("확인필요", f"{review_count}건")
+        col4.metric("불가능", f"{fail_count}건")
+        col5.metric("🚫 서비스종료", f"{service_end_count}건")
+
+        total_amount = result_df[result_df['과금 가능 여부'] == '가능']['요금'].sum()
+        st.metric("총 과금액 (VAT 별도)", f"₩{total_amount:,.0f}")
+
+        st.caption(
+            f"담당지사 제외: {st.session_state.stats['excluded_jisa_count']}건 / "
+            f"디렉토리 별도계약 제외: {st.session_state.stats['excluded_dir_count']}건"
+        )
+
+        # ===== 확인필요 목록 (가능/불가능 버튼 포함) =====
+        review_mask = result_df['과금 가능 여부'] == '확인필요'
+        review_df = result_df[review_mask]
+
+        if len(review_df) > 0:
             st.divider()
-            st.subheader("결과 요약")
+            st.subheader(f"⚠️ 확인필요 목록 ({len(review_df)}건)")
+            st.caption("각 항목을 확인하고 가능/불가능을 선택해주세요. 선택하면 바로 반영됩니다.")
 
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("원본", f"{stats['original_count']}건")
-            col2.metric("가능", f"{stats['ok_count']}건")
-            col3.metric("확인필요", f"{stats['review_count']}건")
-            col4.metric("불가능", f"{stats['fail_count']}건")
+            for idx, row in review_df.iterrows():
+                with st.container():
+                    cols = st.columns([3, 2, 1.5, 1.5, 1, 1])
+                    cols[0].write(f"**{row['기관명']}**")
+                    cols[1].write(f"{row['반명']}")
+                    cols[2].write(f"성공률: {row['스토리라인 성공률']:.1%}")
+                    cols[3].write(f"{row['담당지사']}")
 
-            total_amount = result_df[result_df['과금 가능 여부'] == '가능']['요금'].sum()
-            st.metric("총 과금액 (VAT 별도)", f"₩{total_amount:,.0f}")
+                    if cols[4].button("✅ 가능", key=f"ok_{idx}", type="primary"):
+                        update_review_item(idx, '가능')
+                        st.rerun()
 
-            st.caption(
-                f"담당지사 제외: {stats['excluded_jisa_count']}건 / "
-                f"디렉토리 별도계약 제외: {stats['excluded_dir_count']}건"
-            )
+                    if cols[5].button("❌ 불가", key=f"fail_{idx}"):
+                        update_review_item(idx, '불가능')
+                        st.rerun()
 
-            # 확인필요 목록
-            if len(review_items) > 0:
-                st.divider()
-                st.subheader("⚠️ 확인필요 목록 (40~60% 경계 구간)")
+            # 전체 일괄 처리 버튼
+            st.divider()
+            bcol1, bcol2, bcol3 = st.columns([1, 1, 4])
+            if bcol1.button("✅ 전체 가능", type="primary"):
+                for idx in review_df.index:
+                    update_review_item(idx, '가능')
+                st.rerun()
+            if bcol2.button("❌ 전체 불가"):
+                for idx in review_df.index:
+                    update_review_item(idx, '불가능')
+                st.rerun()
+        else:
+            st.success("✅ 확인필요 항목이 없습니다. 모두 처리 완료!")
+
+        # ===== 서비스 종료 목록 =====
+        service_end_mask = result_df['과금 가능 여부'] == '불가능(서비스종료)'
+        service_end_df = result_df[service_end_mask]
+
+        if len(service_end_df) > 0:
+            st.divider()
+            with st.expander(f"🚫 서비스 종료 ({len(service_end_df)}건) - 자동 불가 처리됨", expanded=False):
+                st.caption("담당지사가 '서비스 종료'인 항목입니다. 과금 불가로 자동 처리되었습니다.")
+                display_cols = ['기관명', '반명', '스토리라인 성공률', '담당지사']
+                available_cols = [c for c in display_cols if c in service_end_df.columns]
                 st.dataframe(
-                    review_items.style.format({'스토리라인 성공률': '{:.1%}'}),
+                    service_end_df[available_cols].style.format(
+                        {'스토리라인 성공률': '{:.1%}'} if '스토리라인 성공률' in available_cols else {}
+                    ),
                     use_container_width=True, hide_index=True
                 )
 
-            # 요약 테이블
-            st.divider()
-            st.subheader("담당지사별 요약")
-            summary = create_summary_sheet(result_df)
-            st.dataframe(
-                summary.style.format('{:,.0f}'),
-                use_container_width=True
+        # 요약 테이블
+        st.divider()
+        st.subheader("담당지사별 요약")
+        summary = create_summary_sheet(result_df)
+        st.dataframe(
+            summary.style.format('{:,.0f}'),
+            use_container_width=True
+        )
+
+        # 전체 결과
+        st.divider()
+        st.subheader("전체 결과")
+
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            status_filter = st.multiselect(
+                "과금 가능 여부",
+                ['가능', '확인필요', '불가능'],
+                default=['가능', '확인필요', '불가능']
             )
 
-            # 전체 결과
-            st.divider()
-            st.subheader("전체 결과")
+        display_df = result_df[result_df['과금 가능 여부'].isin(status_filter)]
+        st.dataframe(
+            display_df.style.format({
+                '스토리라인 성공률': '{:.1%}',
+                '요금': '{:,.0f}'
+            }),
+            use_container_width=True, hide_index=True, height=400
+        )
 
-            filter_col1, filter_col2 = st.columns(2)
-            with filter_col1:
-                status_filter = st.multiselect(
-                    "과금 가능 여부",
-                    ['가능', '확인필요', '불가능'],
-                    default=['가능', '확인필요', '불가능']
-                )
+        # 다운로드
+        st.divider()
+        output = BytesIO()
+        result_df.to_excel(output, index=False, sheet_name=selected_sheet)
+        output.seek(0)
 
-            display_df = result_df[result_df['과금 가능 여부'].isin(status_filter)]
-            st.dataframe(
-                display_df.style.format({
-                    '스토리라인 성공률': '{:.1%}',
-                    '요금': '{:,.0f}'
-                }),
-                use_container_width=True, hide_index=True, height=400
-            )
+        st.download_button(
+            label="📥 과금 Raw 다운로드 (.xlsx)",
+            data=output,
+            file_name=f"과금_Raw_{selected_sheet}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
 
-            # 다운로드
-            st.divider()
-            output = BytesIO()
-            result_df.to_excel(output, index=False, sheet_name=selected_sheet)
-            output.seek(0)
-
-            st.download_button(
-                label="📥 과금 Raw 다운로드 (.xlsx)",
-                data=output,
-                file_name=f"과금_Raw_{selected_sheet}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
-            )
-
-            st.success("✅ 2단계 탭에서 거래명세서를 생성할 수 있습니다!")
+        st.success("✅ 2단계 탭에서 거래명세서를 생성할 수 있습니다!")
 
 
 # ===== 2단계: 거래명세서 생성 =====
