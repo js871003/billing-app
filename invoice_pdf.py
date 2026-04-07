@@ -1,9 +1,13 @@
 """
-거래명세서 PDF 직접 생성 모듈
-- reportlab CID 한글 폰트 사용 (외부 폰트 불필요)
-- 완성본 양식과 동일한 레이아웃
-- Mac Preview / Chrome / Adobe Reader 에서 정상 한글 출력
+거래명세서 PDF 생성 모듈 v2.2
+- 폰트 크기 통일 (데이터 셀 일괄 9pt)
+- 합계금액 콤마 표시
+- 좌우 여백 조정 (표가 페이지 끝까지 안 차도록)
+- 2025 카테고리: 2025_주5회/주3회 (약정 3년) + 2025_한결_주5회/주3회 (약정 3년)
+- 도장(stamp.png) 자동 삽입
+- 공급자 주소: 서울 강남구 삼성동 천해빌딩 10층
 """
+
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
@@ -14,28 +18,70 @@ import calendar
 import os
 
 # 한글 CID 폰트 등록
-pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))  # 명조
-pdfmetrics.registerFont(UnicodeCIDFont('HYGothic-Medium'))      # 고딕
+pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))
+pdfmetrics.registerFont(UnicodeCIDFont('HYGothic-Medium'))
+FONT_G = 'HYGothic-Medium'  # 고딕 (한글 텍스트)
+FONT_M = 'HYSMyeongJo-Medium'  # 명조 (숫자)
 
-FONT_G = 'HYGothic-Medium'
-FONT_M = 'HYSMyeongJo-Medium'
+# ========== 폰트 크기 (통일) ==========
+SIZE_TITLE = 22
+SIZE_RECIPIENT = 13
+SIZE_TOTAL_LABEL = 12
+SIZE_TOTAL_VALUE = 12
+SIZE_HEADER_LABEL = 9    # 사업자등록번호 등
+SIZE_HEADER_VALUE = 10   # 870-88-02332 등
+SIZE_TABLE_HEADER = 9    # 이용월, 대리점 등
+SIZE_TABLE_DATA = 9      # 데이터 셀 (통일)
+SIZE_SUMMARY_LABEL = 9   # 공급가, 부가세
+SIZE_SUMMARY_VALUE = 10  # 금액
+SIZE_BANK = 10
 
-# 공급자 정보
+# ========== 공급자 정보 ==========
 SUPPLIER = {
     'biz_no': '870-88-02332',
     'company': '플레이태그',
     'ceo': '박현수',
     'phone': '02-553-0214',
-    'address': '서울 강남구 강남대로140길 9, 5층',
+    'address': '서울 강남구 삼성동 천해빌딩 10층',
     'bank': '하나은행 / 플레이태그주식회사 / 403-910059-30704',
 }
 
-PRICE_TO_PLAN = {
-    60000: ('Standard', '1년'),
-    54000: ('Standard', '3년'),
-    48000: ('Basic', '1년'),
-    43200: ('Basic', '3년'),
-}
+
+def _categorize_row(row):
+    """
+    거래명세서 카테고리 분류 (가격 기반)
+    Returns: (category, 약정_label, sort_order)
+    """
+    contract_year = row.get('contract_year', '')
+    price = row.get('요금', 0)
+    jisa = row.get('담당지사', '')
+
+    if contract_year == '디렉토리':
+        return ('디렉토리', 'BASIC(3)', 999)
+
+    # 2024 계약
+    if contract_year == '2024':
+        if price == 60000:
+            return ('2024_주5회', '1년', 1)
+        elif price == 54000:
+            return ('2024_주5회', '3년', 2)
+        elif price == 48000:
+            return ('2024_주3회', '1년', 3)
+        elif price == 43200:
+            return ('2024_주3회', '3년', 4)
+
+    # 2025 계약 - 약정 모두 3년
+    if contract_year == '2025':
+        if jisa == '한결교육' and price == 60000:
+            return ('2025_한결_주5회', '3년', 7)
+        if jisa == '한결교육' and price == 48000:
+            return ('2025_한결_주3회', '3년', 8)
+        if price == 95000:
+            return ('2025_주5회', '3년', 5)
+        if price == 83000:
+            return ('2025_주3회', '3년', 6)
+
+    return ('기타', '', 999)
 
 
 def _fmt(n):
@@ -43,16 +89,11 @@ def _fmt(n):
 
 
 def _draw_stamp(c, cx, cy, size=38):
-    """
-    도장 이미지를 PDF에 삽입
-    cx, cy: 도장 중심 좌표
-    size: 도장 크기 (가로=세로)
-    """
+    """도장 이미지 삽입 (없으면 (인) 텍스트로 대체)"""
     stamp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stamp.png')
     if os.path.exists(stamp_path):
         c.drawImage(stamp_path, cx - size/2, cy - size/2, size, size, mask='auto')
     else:
-        # fallback: (인) 텍스트
         c.setFont(FONT_G, 9)
         c.setFillColorRGB(0.85, 0.1, 0.1)
         c.drawCentredString(cx, cy - 4, '(인)')
@@ -60,16 +101,13 @@ def _draw_stamp(c, cx, cy, size=38):
 
 
 def _draw_cell(c, x, y, w, h, text='', font=FONT_G, size=9,
-               align='center', border=True, bold=False):
-    """셀 하나를 그리는 유틸리티"""
+               align='center', border=True):
     if border:
         c.rect(x, y, w, h)
     if not text:
         return
-
     c.setFont(font, size)
-    ty = y + h / 2 - size * 0.35  # 수직 중앙
-
+    ty = y + h / 2 - size * 0.35
     if align == 'center':
         c.drawCentredString(x + w / 2, ty, str(text))
     elif align == 'right':
@@ -78,94 +116,52 @@ def _draw_cell(c, x, y, w, h, text='', font=FONT_G, size=9,
         c.drawString(x + 4, ty, str(text))
 
 
-def create_invoice_pdf(df_raw, recipient_name, billing_month, recipient_info=None):
-    """
-    거래명세서 PDF 생성 (완성본 양식 재현)
-
-    Returns: BytesIO (PDF 데이터)
-    """
-    if recipient_info is None:
-        recipient_info = {'address': '', 'biz_no': '', 'email': ''}
-
-    # === 데이터 준비 ===
-    billing_ok = df_raw[df_raw['과금 가능 여부'] == '가능']
-    price_groups = billing_ok.groupby('요금').size().reset_index(name='수량')
-    price_groups = price_groups[price_groups['요금'] > 0].sort_values('요금', ascending=False)
-
-    data_rows = []
-    for _, grp in price_groups.iterrows():
-        price = int(grp['요금'])
-        qty = int(grp['수량'])
-        plan, contract = PRICE_TO_PLAN.get(price, ('Unknown', ''))
-        data_rows.append({
-            'plan': plan, 'contract': contract,
-            'qty': qty, 'price': price,
-            'amount': price * qty,
-        })
-
-    supply = sum(r['amount'] for r in data_rows)
-    vat = int(supply * 0.1)
-    total = supply + vat
-
-    # 날짜 계산
+def _parse_billing_date(billing_month):
+    """billing_month '26.03' → '2026년 3월 31일'"""
     try:
         yy, mm_ = billing_month.split('.')
         yr = 2000 + int(yy)
         mo = int(mm_)
         last_day = calendar.monthrange(yr, mo)[1]
-        date_str = f"{yr}년 {mo}월 {last_day}일"
+        return f"{yr}년 {mo}월 {last_day}일"
     except Exception:
         from datetime import datetime
-        date_str = datetime.now().strftime("%Y년 %m월 %d일")
+        return datetime.now().strftime("%Y년 %m월 %d일")
 
-    # === PDF 캔버스 ===
-    buf = BytesIO()
-    W, H = A4
-    c = canvas.Canvas(buf, pagesize=A4)
-    c.setTitle('거래명세서')
 
-    LM = 42        # 좌측 마진
-    RM = W - 42     # 우측 끝
-    PW = RM - LM    # 페이지 폭
+def _draw_invoice_header(c, W, H, LM, RM, recipient_name, recipient_info,
+                          date_str, total_amount):
+    """거래명세서 상단 영역 (제목, 날짜, 공급자/수신자, 합계금액)"""
 
-    # ──────────────────────────────────────────
     # 1. 상단 구분선
-    # ──────────────────────────────────────────
     y = H - 42
     c.setLineWidth(1.5)
     c.line(LM, y, RM, y)
 
-    # ──────────────────────────────────────────
     # 2. 제목
-    # ──────────────────────────────────────────
     y -= 38
-    c.setFont(FONT_G, 22)
-    c.drawCentredString(W / 2, y, '거  래  명  세  서')
+    c.setFont(FONT_G, SIZE_TITLE)
+    c.drawCentredString(W / 2, y, '거 래 명 세 서')
     y -= 10
     c.setLineWidth(0.3)
     c.line(LM, y, RM, y)
 
-    # ──────────────────────────────────────────
     # 3. 날짜
-    # ──────────────────────────────────────────
     y -= 20
-    c.setFont(FONT_G, 10)
-    c.drawString(LM, y, f'날짜 :    {date_str}')
+    c.setFont(FONT_G, SIZE_HEADER_VALUE)
+    c.drawString(LM, y, f'날짜 : {date_str}')
 
-    # ──────────────────────────────────────────
     # 4. 공급자 테이블 (우측 절반)
-    # ──────────────────────────────────────────
-    st = y - 10  # supplier table top
-    rh = 21      # row height
-    sl = W * 0.42  # 공급자 테이블 좌측 시작
-    lbl_w = 24   # "공급자" 라벨 칸
-    fld_w = 76   # 필드명 칸 (사업자등록번호 등)
-    val_x = sl + lbl_w + fld_w  # 값 시작
+    st = y - 10
+    rh = 21
+    sl = LM + (RM - LM) * 0.45  # 좌측 마진 기준으로 위치 조정
+    lbl_w = 24
+    fld_w = 80
+    val_x = sl + lbl_w + fld_w
 
-    # 공/급/자 세로 병합 셀
     c.setLineWidth(0.5)
     c.rect(sl, st - rh * 4, lbl_w, rh * 4)
-    c.setFont(FONT_G, 10)
+    c.setFont(FONT_G, SIZE_HEADER_VALUE)
     cx = sl + lbl_w / 2
     c.drawCentredString(cx, st - rh * 1 + 5, '공')
     c.drawCentredString(cx, st - rh * 2 + 5, '급')
@@ -173,42 +169,43 @@ def create_invoice_pdf(df_raw, recipient_name, billing_month, recipient_info=Non
 
     # R1: 사업자등록번호
     ry = st - rh
-    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '사업자등록번호', size=9)
-    _draw_cell(c, val_x, ry, RM - val_x, rh, SUPPLIER['biz_no'], font=FONT_M, size=10)
+    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '사업자등록번호', size=SIZE_HEADER_LABEL)
+    _draw_cell(c, val_x, ry, RM - val_x, rh, SUPPLIER['biz_no'],
+               font=FONT_M, size=SIZE_HEADER_VALUE)
 
-    # R2: 상호 + 대표자
+    # R2: 상호 + 대표자 (도장!)
     ry = st - rh * 2
-    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '상호', size=9)
+    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '상호', size=SIZE_HEADER_LABEL)
     mid = val_x + (RM - val_x) * 0.48
     rep_lbl = mid + (RM - mid) * 0.38
-    _draw_cell(c, val_x, ry, mid - val_x, rh, SUPPLIER['company'], font=FONT_M, size=10)
-    _draw_cell(c, mid, ry, rep_lbl - mid, rh, '대표자', size=9)
+    _draw_cell(c, val_x, ry, mid - val_x, rh, SUPPLIER['company'],
+               font=FONT_M, size=SIZE_HEADER_VALUE)
+    _draw_cell(c, mid, ry, rep_lbl - mid, rh, '대표자', size=SIZE_HEADER_LABEL)
     _draw_cell(c, rep_lbl, ry, RM - rep_lbl, rh,
-               f'{SUPPLIER["ceo"]}', font=FONT_M, size=10, align='left')
-    # 도장 찍기 (대표자 이름 오른쪽)
+               f'{SUPPLIER["ceo"]}', font=FONT_M, size=SIZE_HEADER_VALUE, align='left')
+    # 도장
     _draw_stamp(c, RM - 24, ry + rh / 2, size=38)
 
     # R3: 전화번호
     ry = st - rh * 3
-    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '전화번호', size=9)
-    _draw_cell(c, val_x, ry, RM - val_x, rh, SUPPLIER['phone'], font=FONT_M, size=10)
+    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '전화번호', size=SIZE_HEADER_LABEL)
+    _draw_cell(c, val_x, ry, RM - val_x, rh, SUPPLIER['phone'],
+               font=FONT_M, size=SIZE_HEADER_VALUE)
 
     # R4: 주소
     ry = st - rh * 4
-    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '주소', size=9)
-    _draw_cell(c, val_x, ry, RM - val_x, rh, SUPPLIER['address'], font=FONT_M, size=10)
+    _draw_cell(c, sl + lbl_w, ry, fld_w, rh, '주소', size=SIZE_HEADER_LABEL)
+    _draw_cell(c, val_x, ry, RM - val_x, rh, SUPPLIER['address'],
+               font=FONT_M, size=SIZE_HEADER_VALUE)
 
-    # ──────────────────────────────────────────
     # 5. 수신자 정보 (좌측)
-    # ──────────────────────────────────────────
-    c.setFont(FONT_G, 13)
-    c.drawString(LM + 12, st - rh - 8, f'{recipient_name}  귀하')
+    c.setFont(FONT_G, SIZE_RECIPIENT)
+    c.drawString(LM + 12, st - rh - 8, f'{recipient_name} 귀하')
 
-    c.setFont(FONT_M, 9)
-    iy = st - rh * 2 + 2  # info y
+    c.setFont(FONT_M, SIZE_HEADER_LABEL)
+    iy = st - rh * 2 + 2
     addr = recipient_info.get('address', '')
     if addr:
-        # 긴 주소 줄바꿈
         if len(addr) > 22:
             c.drawString(LM + 12, iy, f'주소 : {addr[:22]}')
             iy -= 13
@@ -221,154 +218,283 @@ def create_invoice_pdf(df_raw, recipient_name, billing_month, recipient_info=Non
     if biz:
         c.drawString(LM + 12, iy, f'사업자 번호 : {biz}')
         iy -= 13
-
     email = recipient_info.get('email', '')
     if email:
         c.drawString(LM + 12, iy, f'이메일 : {email}')
 
-    # ──────────────────────────────────────────
-    # 6. 합계금액 행
-    # ──────────────────────────────────────────
+    # 6. 합계금액 행 (콤마 적용!)
     y_sum = st - rh * 4 - 20
-    c.setFont(FONT_G, 12)
+    c.setFont(FONT_G, SIZE_TOTAL_LABEL)
     c.drawString(LM + 12, y_sum, '합계금액 :')
-    c.setFont(FONT_G, 11)
-    c.drawString(LM + 90, y_sum, f'{int(total)}  원정')
-    c.setFont(FONT_G, 11)
-    c.drawString(W / 2 + 55, y_sum, '₩')
-    c.setFont(FONT_G, 12)
-    c.drawRightString(RM - 4, y_sum, _fmt(total))
+    c.drawString(LM + 100, y_sum, f'{_fmt(total_amount)} 원정')
+    c.drawString(W / 2 + 80, y_sum, '₩')
+    c.drawRightString(RM - 4, y_sum, _fmt(total_amount))
 
-    # ──────────────────────────────────────────
-    # 7. 데이터 테이블
-    # ──────────────────────────────────────────
-    hdr_y = y_sum - 16
-    hdr_h = 20
-    drh = 19  # data row height
-    MAX_ROWS = 18
+    return y_sum
 
-    # 열 정의: (이름, x, w)
-    C = [
-        ('이용월',  LM,       50),
-        ('대리점',  LM + 50,  116),
-        ('요금제',  LM + 166, 78),
-        ('약정',    LM + 244, 40),
-        ('수량',    LM + 284, 40),
-        ('요율',    LM + 324, 40),
-        ('단가',    LM + 364, 56),
-        ('금  액',  LM + 420, PW - 420 + LM),
-    ]
 
-    # 헤더
-    for name, x, w in C:
-        _draw_cell(c, x, hdr_y - hdr_h, w, hdr_h, name, size=9)
+def _draw_invoice_footer(c, W, LM, RM, hdr_y, max_rows, drh,
+                          col_table, supply, vat, total, 비고_text):
+    """비고 + 합계 + 입금정보"""
+    PW = RM - LM
 
-    # 데이터 행
-    for i in range(MAX_ROWS):
-        ry = hdr_y - hdr_h - (i + 1) * drh
+    # 비고 영역의 우측 경계 = 단가 칸 시작 위치
+    danga_x = col_table[6][1]    # 단가 컬럼 x
+    danga_w = col_table[6][2]
+    geum_x = col_table[7][1]
+    geum_w = col_table[7][2]
 
-        if i < len(data_rows):
-            d = data_rows[i]
-            vals = [
-                (billing_month, FONT_G, 9, 'center'),
-                (recipient_name, FONT_G, 7, 'center'),
-                (d['plan'], FONT_G, 9, 'center'),
-                (str(d['contract']), FONT_G, 9, 'center'),
-                (str(d['qty']), FONT_G, 9, 'center'),
-                ('100%', FONT_G, 9, 'center'),
-                (_fmt(d['price']), FONT_M, 9, 'right'),
-                (_fmt(d['amount']), FONT_M, 9, 'right'),
-            ]
-        else:
-            vals = [
-                ('', FONT_G, 9, 'center'),
-                ('', FONT_G, 9, 'center'),
-                ('', FONT_G, 9, 'center'),
-                ('', FONT_G, 9, 'center'),
-                ('', FONT_G, 9, 'center'),
-                ('', FONT_G, 9, 'center'),
-                ('- -', FONT_M, 9, 'right'),
-                ('- -', FONT_M, 9, 'right'),
-            ]
+    bottom = hdr_y - drh - (max_rows + 1) * drh
+    sy = bottom - 6
+    sh = drh
 
-        for j, (name, x, w) in enumerate(C):
-            text, font, sz, al = vals[j]
-            _draw_cell(c, x, ry, w, drh, text, font=font, size=sz, align=al)
-
-    # ──────────────────────────────────────────
-    # 8. 하단: 비고 + 공급가/부가세/합계
-    # ──────────────────────────────────────────
-    bottom = hdr_y - hdr_h - (MAX_ROWS + 1) * drh
-    sy = bottom - 6  # summary top
-    sh = drh  # summary row height
-
-    # 비고 영역 (좌측, 3행 높이)
-    bigo_right = C[5][1] + C[5][2]  # 요율 칸 끝
+    # 비고 영역 (3행 높이)
     bigo_h = sh * 3
-    c.rect(LM, sy - bigo_h, bigo_right - LM, bigo_h)
-    c.setFont(FONT_G, 9)
-    c.drawString(LM + 5, sy - 14, '비  고 :')
-    c.setFont(FONT_M, 9)
-    c.drawString(LM + 5, sy - 28, '1) 상세 데이터 별도 제공')
+    c.rect(LM, sy - bigo_h, danga_x - LM, bigo_h)
+    c.setFont(FONT_G, SIZE_SUMMARY_LABEL)
+    c.drawString(LM + 5, sy - 14, '비 고 :')
+    if 비고_text:
+        c.setFont(FONT_M, SIZE_SUMMARY_LABEL)
+        c.drawString(LM + 5, sy - 28, 비고_text)
 
-    # 공급가 / 부가세 / 합계금액 (우측)
-    lbl_x = C[6][1]  # 단가 칸 시작
-    lbl_w2 = C[6][2]
-    val_x2 = C[7][1]
-    val_w2 = C[7][2]
-
+    # 공급가 / 부가세 / 합계
     items = [
-        ('공  급  가', supply),
+        ('공 급 가', supply),
         ('부가세', vat),
         ('합 계 금 액', total),
     ]
     for i, (label, value) in enumerate(items):
         ry = sy - (i + 1) * sh
-        _draw_cell(c, lbl_x, ry, lbl_w2, sh, label, size=9)
-        _draw_cell(c, val_x2, ry, val_w2, sh, _fmt(value), font=FONT_M, size=10, align='right')
+        _draw_cell(c, danga_x, ry, danga_w, sh, label, size=SIZE_SUMMARY_LABEL)
+        _draw_cell(c, geum_x, ry, geum_w, sh, _fmt(value),
+                   font=FONT_M, size=SIZE_SUMMARY_VALUE, align='right')
 
-    # ──────────────────────────────────────────
-    # 9. 입금정보
-    # ──────────────────────────────────────────
+    # 입금정보
     bank_y = sy - bigo_h - 14
-    c.setFont(FONT_G, 10)
+    c.setFont(FONT_G, SIZE_BANK)
     c.drawString(LM + 5, bank_y, f'입금정보 : {SUPPLIER["bank"]}')
 
-    # 완료
+
+# ========== 총판 거래명세서 PDF ==========
+
+def create_invoice_pdf(df_raw, recipient_name, billing_month, recipient_info=None):
+    """
+    총판 거래명세서 PDF 생성
+    카테고리: 2024_주5회/주3회 + 2025_주5회/주3회 + 2025_한결_주5회/주3회
+    """
+    if recipient_info is None:
+        recipient_info = {'address': '', 'biz_no': '', 'email': ''}
+
+    billing_ok = df_raw[df_raw['과금 가능 여부'] == '가능'].copy()
+
+    cats = billing_ok.apply(_categorize_row, axis=1)
+    billing_ok['category'] = cats.apply(lambda x: x[0])
+    billing_ok['약정_label'] = cats.apply(lambda x: x[1])
+    billing_ok['sort_order'] = cats.apply(lambda x: x[2])
+
+    grouped = billing_ok.groupby(
+        ['sort_order', 'category', '약정_label', '요금']
+    ).size().reset_index(name='수량')
+    grouped = grouped.sort_values(['sort_order', '요금'], ascending=[True, False])
+
+    data_rows = []
+    for _, grp in grouped.iterrows():
+        price = int(grp['요금'])
+        qty = int(grp['수량'])
+        amount = price * qty  # 100% rate
+        data_rows.append({
+            'plan': grp['category'],
+            'contract': grp['약정_label'],
+            'qty': qty,
+            'price': price,
+            'amount': amount,
+            'rate': '100%',
+        })
+
+    supply = sum(r['amount'] for r in data_rows)
+    vat = int(supply * 0.1)
+    total = supply + vat
+
+    date_str = _parse_billing_date(billing_month)
+
+    # === PDF 생성 ===
+    buf = BytesIO()
+    W, H = A4
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setTitle('거래명세서_총판')
+
+    # 여백 설정 (이전보다 넓게)
+    LM = 55
+    RM = W - 55
+    PW = RM - LM
+
+    y_sum = _draw_invoice_header(c, W, H, LM, RM, recipient_name, recipient_info,
+                                  date_str, total)
+
+    # 데이터 테이블
+    hdr_y = y_sum - 16
+    hdr_h = 20
+    drh = 19
+    MAX_ROWS = 18
+
+    # 컬럼 정의 (총 PW = 485)
+    # 이용월(45) + 대리점(105) + 요금제(95) + 약정(35) + 수량(35) + 요율(35) + 단가(55) + 금액(80)
+    col_widths = [45, 105, 95, 35, 35, 35, 55, 80]
+    col_x = [LM]
+    for w in col_widths[:-1]:
+        col_x.append(col_x[-1] + w)
+    col_names = ['이용월', '대리점', '요금제', '약정', '수량', '요율', '단가', '금 액']
+    C = list(zip(col_names, col_x, col_widths))
+
+    # 헤더
+    for name, x, w in C:
+        _draw_cell(c, x, hdr_y - hdr_h, w, hdr_h, name, size=SIZE_TABLE_HEADER)
+
+    # 데이터 행 (모든 셀 SIZE_TABLE_DATA로 통일)
+    for i in range(MAX_ROWS):
+        ry = hdr_y - hdr_h - (i + 1) * drh
+        if i < len(data_rows):
+            d = data_rows[i]
+            vals = [
+                (billing_month, FONT_G, 'center'),
+                (recipient_name, FONT_G, 'center'),
+                (d['plan'], FONT_G, 'center'),
+                (str(d['contract']), FONT_G, 'center'),
+                (str(d['qty']), FONT_G, 'center'),
+                (d['rate'], FONT_G, 'center'),
+                (_fmt(d['price']), FONT_M, 'right'),
+                (_fmt(d['amount']), FONT_M, 'right'),
+            ]
+        else:
+            vals = [
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('- -', FONT_M, 'right'),
+                ('- -', FONT_M, 'right'),
+            ]
+        for j, (name, x, w) in enumerate(C):
+            text, font, al = vals[j]
+            _draw_cell(c, x, ry, w, drh, text,
+                       font=font, size=SIZE_TABLE_DATA, align=al)
+
+    # 푸터
+    _draw_invoice_footer(c, W, LM, RM, hdr_y, MAX_ROWS, drh, C,
+                         supply, vat, total, '1) 상세 데이터 별도 제공')
+
     c.save()
     buf.seek(0)
     return buf
 
 
-# ===== 테스트 =====
-if __name__ == '__main__':
-    import pandas as pd
-    import os
+# ========== 디렉토리 거래명세서 PDF ==========
 
-    # 완성본과 동일한 테스트 데이터
-    test_data = (
-        [{'과금 가능 여부': '가능', '요금': 60000}] * 11 +
-        [{'과금 가능 여부': '가능', '요금': 54000}] * 225 +
-        [{'과금 가능 여부': '가능', '요금': 48000}] * 68 +
-        [{'과금 가능 여부': '가능', '요금': 43200}] * 159
-    )
-    df = pd.DataFrame(test_data)
+def create_directory_invoice_pdf(df_directory, recipient_name='디렉토리',
+                                   billing_month='', recipient_info=None):
+    """
+    디렉토리 거래명세서 PDF 생성
+    각 행: 기관명 / BASIC(3) / 수량 / 50% / 72,000원 / 금액
+    """
+    if recipient_info is None:
+        recipient_info = {'address': '', 'biz_no': '', 'email': ''}
 
-    recipient_info = {
-        'address': '인천광역시 서구 파랑로 495 2동 3층 302호 (청라 에이스)',
-        'biz_no': '406-81-66140',
-        'email': 'goldengate2021@naver.com',
-    }
+    billing_ok = df_directory[df_directory['과금 가능 여부'] == '가능'].copy()
 
-    pdf = create_invoice_pdf(
-        df,
-        recipient_name='문화사 외 16개 지사',
-        billing_month='25.12',
-        recipient_info=recipient_info,
-    )
+    grouped = billing_ok.groupby('기관명').agg(
+        수량=('사이트아이디', 'count'),
+        요금=('요금', 'first'),
+    ).reset_index()
+    grouped = grouped.sort_values('수량', ascending=False)
 
-    out = '/sessions/dreamy-exciting-tesla/mnt/jin/Downloads/billing-app/test_invoice.pdf'
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, 'wb') as f:
-        f.write(pdf.read())
-    print(f"✅ PDF 생성: {out}")
+    data_rows = []
+    for _, grp in grouped.iterrows():
+        qty = int(grp['수량'])
+        price = int(grp['요금'])
+        amount = int(qty * price * 0.5)  # 50% rate
+        data_rows.append({
+            'institution': grp['기관명'],
+            'category': 'BASIC(3)',
+            'qty': qty,
+            'price': price,
+            'amount': amount,
+            'rate': '50%',
+        })
+
+    supply = sum(r['amount'] for r in data_rows)
+    vat = int(supply * 0.1)
+    total = supply + vat
+
+    date_str = _parse_billing_date(billing_month)
+
+    # === PDF 생성 ===
+    buf = BytesIO()
+    W, H = A4
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setTitle('거래명세서_디렉토리')
+
+    LM = 55
+    RM = W - 55
+    PW = RM - LM
+
+    y_sum = _draw_invoice_header(c, W, H, LM, RM, recipient_name, recipient_info,
+                                  date_str, total)
+
+    # 데이터 테이블
+    hdr_y = y_sum - 16
+    hdr_h = 20
+    drh = 19
+    MAX_ROWS = 18
+
+    # 컬럼 정의 (총 PW = 485)
+    # 이용월(45) + 대리점(60) + 기관명(140) + 구분(35) + 수량(35) + 요율(35) + 단가(55) + 금액(80)
+    col_widths = [45, 60, 140, 35, 35, 35, 55, 80]
+    col_x = [LM]
+    for w in col_widths[:-1]:
+        col_x.append(col_x[-1] + w)
+    col_names = ['이용월', '대리점', '기관명', '구분', '수량', '요율', '단가', '금 액']
+    C = list(zip(col_names, col_x, col_widths))
+
+    # 헤더
+    for name, x, w in C:
+        _draw_cell(c, x, hdr_y - hdr_h, w, hdr_h, name, size=SIZE_TABLE_HEADER)
+
+    # 데이터 행
+    for i in range(MAX_ROWS):
+        ry = hdr_y - hdr_h - (i + 1) * drh
+        if i < len(data_rows):
+            d = data_rows[i]
+            vals = [
+                (billing_month, FONT_G, 'center'),
+                ('디렉토리', FONT_G, 'center'),
+                (d['institution'], FONT_G, 'center'),
+                (d['category'], FONT_G, 'center'),
+                (str(d['qty']), FONT_G, 'center'),
+                (d['rate'], FONT_G, 'center'),
+                (_fmt(d['price']), FONT_M, 'right'),
+                (_fmt(d['amount']), FONT_M, 'right'),
+            ]
+        else:
+            vals = [
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('', FONT_G, 'center'),
+                ('- -', FONT_M, 'right'),
+                ('- -', FONT_M, 'right'),
+            ]
+        for j, (name, x, w) in enumerate(C):
+            text, font, al = vals[j]
+            _draw_cell(c, x, ry, w, drh, text,
+                       font=font, size=SIZE_TABLE_DATA, align=al)
+
+    _draw_invoice_footer(c, W, LM, RM, hdr_y, MAX_ROWS, drh, C,
+                         supply, vat, total, '')
+
+    c.save()
+    buf.seek(0)
+    return buf
