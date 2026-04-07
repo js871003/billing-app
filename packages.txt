@@ -1,5 +1,0 @@
-libreoffice
-fonts-nanum
-fonts-nanum-coding
-fonts-nanum-extra
-fonts-noto-cjk
