@@ -292,306 +292,490 @@ def split_by_directory(df, directory_sites):
 
 # ========== 거래명세서 양식 헬퍼 ==========
 
-def _setup_invoice_layout(ws, recipient_name, recipient_info, billing_date,
-                          col3_header='요금제', col_d_header='약정', 비고_text=''):
-    """공통 레이아웃 (Row 1~10 + Row 33~37)"""
+def _set_range_border(ws, cell_range, border):
+    """병합 셀 범위의 외곽선만 설정 (내부 분할선 없음).
+    openpyxl에서 병합 셀의 내부 셀에도 border를 설정하면
+    LibreOffice/Excel에서 내부 분할선이 보이는 문제를 해결합니다.
+    """
+    from openpyxl.utils import range_boundaries
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+
+    # border 객체에서 side 추출 (모든 방향이 같다고 가정)
+    side = border.left
+
+    for row in range(min_row, max_row + 1):
+        for col in range(min_col, max_col + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.border = Border(
+                left=side if col == min_col else None,
+                right=side if col == max_col else None,
+                top=side if row == min_row else None,
+                bottom=side if row == max_row else None,
+            )
+
+
+def _outer_border_range(ws, cell_range, side):
+    """범위의 외곽선만 medium 두께로 그리기"""
+    from openpyxl.utils import range_boundaries
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+    for row in range(min_row, max_row + 1):
+        for col in range(min_col, max_col + 1):
+            cell = ws.cell(row=row, column=col)
+            existing = cell.border
+            new_border = Border(
+                left=side if col == min_col else existing.left,
+                right=side if col == max_col else existing.right,
+                top=side if row == min_row else existing.top,
+                bottom=side if row == max_row else existing.bottom,
+            )
+            cell.border = new_border
+
+
+def _fill_range(ws, cell_range, fill):
+    """범위 내 모든 셀에 fill 적용"""
+    from openpyxl.utils import range_boundaries
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+    for row in range(min_row, max_row + 1):
+        for col in range(min_col, max_col + 1):
+            ws.cell(row=row, column=col).fill = fill
+
+
+def _setup_invoice_common(ws, recipient_name, recipient_info, billing_date,
+                           supply=0, vat=0, total=0):
+    """거래명세서 공통 영역: 헤더(Row 1~9), 합계(Row 33~37)
+    데이터 테이블(Row 10~32)은 호출 측에서 설정
+    supply/vat/total: 미리 계산된 값 (수식 대신 직접 표시)"""
+
+    # 그리드 라인 숨기기 (빈 셀 사이 구분선 제거)
+    ws.sheet_view.showGridLines = False
+
+    # 인쇄 설정
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
     ws.page_setup.orientation = 'portrait'
     ws.page_setup.fitToPage = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
     ws.print_area = 'A1:M37'
-    ws.page_margins.left = 0.5
-    ws.page_margins.right = 0.5
-    ws.page_margins.top = 0.5
-    ws.page_margins.bottom = 0.5
+    ws.page_margins.left = 0.4
+    ws.page_margins.right = 0.4
+    ws.page_margins.top = 0.4
+    ws.page_margins.bottom = 0.4
 
-    font_title = Font(name='Dotum', size=25)
-    font_normal = Font(name='Dotum', size=11)
-    font_normal_bold = Font(name='Dotum', size=11, bold=True)
-    font_recipient = Font(name='Dotum', size=13, bold=True)
-
+    # 스타일
     thin = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
+    font_title = Font(name='Dotum', size=22, bold=True)
+    font_normal = Font(name='Dotum', size=10)
+    font_normal_bold = Font(name='Dotum', size=10, bold=True)
+    font_recipient = Font(name='Dotum', size=12, bold=True)
+    header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
-    col_widths = {'A': 8.86, 'B': 17.57, 'C': 45.29, 'D': 5.43, 'E': 1.86,
-                  'F': 13.0, 'G': 10.71, 'H': 8.86, 'I': 3.14, 'J': 7.29,
-                  'K': 2.14, 'L': 5.14, 'M': 16.43}
-    for col, width in col_widths.items():
-        ws.column_dimensions[col].width = width
-
+    # === Row 1: 빈 행 ===
     ws.row_dimensions[1].height = 12
-    ws.row_dimensions[2].height = 38.25
+
+    # === Row 2: 제목 ===
+    ws.row_dimensions[2].height = 38
     ws.merge_cells('A2:M2')
     ws['A2'] = '거 래 명 세 서'
     ws['A2'].font = font_title
     ws['A2'].alignment = Alignment(horizontal='center', vertical='center')
 
-    ws.row_dimensions[3].height = 28.5
-    ws.row_dimensions[4].height = 21.75
+    # === Row 3: 빈 행 ===
+    ws.row_dimensions[3].height = 12
+
+    # === Row 4: 날짜 ===
+    ws.row_dimensions[4].height = 22
     ws['A4'] = '날짜 :'
     ws['A4'].font = font_normal_bold
+    ws['A4'].alignment = left_align
     ws.merge_cells('B4:C4')
     ws['B4'] = billing_date if billing_date else datetime.now()
     ws['B4'].font = font_normal_bold
     ws['B4'].number_format = 'YYYY"년" M"월" D"일"'
+    ws['B4'].alignment = left_align
 
+    # === Row 5~8: 공급자/수신자 정보 ===
     for r in range(5, 9):
-        ws.row_dimensions[r].height = 30
+        ws.row_dimensions[r].height = 24
 
+    # 공/급/자 세로 병합 셀
     ws.merge_cells('D5:D8')
-    ws['D5'] = '공\n\n급\n\n자'
+    ws['D5'] = '공\n급\n자'
     ws['D5'].font = font_normal_bold
     ws['D5'].alignment = center
-    ws['D5'].border = thin
+    _set_range_border(ws, 'D5:D8', thin)
+    _fill_range(ws, 'D5:D8', header_fill)
 
+    # R5: 사업자등록번호
     ws.merge_cells('E5:G5')
     ws['E5'] = '사업자등록번호'
     ws['E5'].font = font_normal_bold
-    ws['E5'].border = thin
     ws['E5'].alignment = center
+    _set_range_border(ws, 'E5:G5', thin)
+    _fill_range(ws, 'E5:G5', header_fill)
+
     ws.merge_cells('H5:M5')
     ws['H5'] = SUPPLIER_INFO['biz_no']
     ws['H5'].font = font_normal
-    ws['H5'].border = thin
     ws['H5'].alignment = center
+    _set_range_border(ws, 'H5:M5', thin)
 
+    # R6: 수신처(좌) + 상호 + 대표자(우)
+    ws.merge_cells('A6:C6')
     ws['A6'] = f' {recipient_name} 귀하'
     ws['A6'].font = font_recipient
+    ws['A6'].alignment = Alignment(horizontal='left', vertical='center')
+    # 수신처 이름 아래 밑줄
+    ws['A6'].border = Border(bottom=Side(style='thin'))
+    ws['B6'].border = Border(bottom=Side(style='thin'))
+    ws['C6'].border = Border(bottom=Side(style='thin'))
 
     ws.merge_cells('E6:G6')
     ws['E6'] = '상호'
     ws['E6'].font = font_normal_bold
-    ws['E6'].border = thin
     ws['E6'].alignment = center
+    _set_range_border(ws, 'E6:G6', thin)
+    _fill_range(ws, 'E6:G6', header_fill)
+
     ws.merge_cells('H6:J6')
     ws['H6'] = SUPPLIER_INFO['company']
     ws['H6'].font = font_normal
-    ws['H6'].border = thin
     ws['H6'].alignment = center
+    _set_range_border(ws, 'H6:J6', thin)
+
     ws.merge_cells('K6:L6')
     ws['K6'] = '대표자'
     ws['K6'].font = font_normal_bold
-    ws['K6'].border = thin
     ws['K6'].alignment = center
+    _set_range_border(ws, 'K6:L6', thin)
+    _fill_range(ws, 'K6:L6', header_fill)
+
     ws['M6'] = f' {SUPPLIER_INFO["ceo"]} (인)'
     ws['M6'].font = font_normal
+    ws['M6'].alignment = left_align
     ws['M6'].border = thin
 
-    addr = recipient_info.get('address', '')
+    # 도장 이미지 삽입 (대표자 이름 옆)
+    import os
+    stamp_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'stamp.png'
+    )
+    if os.path.exists(stamp_path):
+        try:
+            from openpyxl.drawing.image import Image as XLImage
+            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor
+            from openpyxl.drawing.xdr import XDRPositiveSize2D
+            from openpyxl.utils.units import pixels_to_EMU
+
+            stamp_img = XLImage(stamp_path)
+            stamp_img.width = 45
+            stamp_img.height = 45
+            # M6 우측에 위치시키기
+            ws.add_image(stamp_img, 'M6')
+        except Exception:
+            pass  # 도장 로드 실패 시 무시
+
+    # R7~8: 수신처 정보(좌) + 전화번호/주소(우)
+    addr_text = recipient_info.get('address', '')
     biz_no = recipient_info.get('biz_no', '')
     email = recipient_info.get('email', '')
-    left_info = f'주소 : {addr}'
+    info_lines = []
+    if addr_text:
+        info_lines.append(f'주소 : {addr_text}')
     if biz_no:
-        left_info += f'\n사업자 번호 : {biz_no}'
+        info_lines.append(f'사업자 번호 : {biz_no}')
     if email:
-        left_info += f'\n이메일 : {email}'
+        info_lines.append(f'이메일 : {email}')
+    left_info = '\n'.join(info_lines)
 
     ws.merge_cells('A7:C8')
     ws['A7'] = left_info
     ws['A7'].font = font_normal
-    ws['A7'].alignment = Alignment(vertical='center', wrap_text=True)
+    ws['A7'].alignment = Alignment(vertical='center', wrap_text=True, horizontal='left')
 
+    # R7: 전화번호
     ws.merge_cells('E7:G7')
     ws['E7'] = '전화번호'
     ws['E7'].font = font_normal_bold
-    ws['E7'].border = thin
     ws['E7'].alignment = center
+    _set_range_border(ws, 'E7:G7', thin)
+    _fill_range(ws, 'E7:G7', header_fill)
+
     ws.merge_cells('H7:M7')
     ws['H7'] = SUPPLIER_INFO['phone']
     ws['H7'].font = font_normal
-    ws['H7'].border = thin
     ws['H7'].alignment = center
+    _set_range_border(ws, 'H7:M7', thin)
 
+    # R8: 주소
     ws.merge_cells('E8:G8')
     ws['E8'] = '주소'
     ws['E8'].font = font_normal_bold
-    ws['E8'].border = thin
     ws['E8'].alignment = center
+    _set_range_border(ws, 'E8:G8', thin)
+    _fill_range(ws, 'E8:G8', header_fill)
+
     ws.merge_cells('H8:M8')
     ws['H8'] = SUPPLIER_INFO['address']
     ws['H8'].font = font_normal
-    ws['H8'].border = thin
     ws['H8'].alignment = center
+    _set_range_border(ws, 'H8:M8', thin)
 
-    # Row 9: 합계금액
-    ws.row_dimensions[9].height = 28.5
-    ws['B9'] = '합계금액 : '
-    ws['B9'].font = font_recipient
-    ws.merge_cells('C9:G9')
-    ws['C9'] = '=K36'
+    # === Row 9: 합계금액 ===
+    ws.row_dimensions[9].height = 30
+    ws.merge_cells('A9:B9')
+    ws['A9'] = '합계금액 :'
+    ws['A9'].font = font_recipient
+    ws['A9'].alignment = Alignment(horizontal='right', vertical='center')
+
+    ws.merge_cells('C9:H9')
+    ws['C9'] = total
     ws['C9'].font = font_recipient
-    ws['C9'].number_format = '#,##0'
-    ws['H9'] = '원정'
-    ws['H9'].font = font_recipient
-    ws.merge_cells('J9:M9')
-    ws['J9'] = '=K36'
-    ws['J9'].font = font_recipient
-    ws['J9'].number_format = '#,##0'
+    ws['C9'].number_format = '#,##0" 원정"'
+    ws['C9'].alignment = Alignment(horizontal='center', vertical='center')
 
-    # Row 10: 헤더
-    ws.row_dimensions[10].height = 24
-    ws['A10'] = '이용월'
-    ws['B10'] = '대리점'
-    ws['C10'] = col3_header
-    ws['G10'] = '수량'
-    ws['H10'] = '요율'
+    ws.merge_cells('I9:J9')
+    ws['I9'] = '₩'
+    ws['I9'].font = font_recipient
+    ws['I9'].alignment = Alignment(horizontal='center', vertical='center')
 
-    for c in ['A10', 'B10', 'C10', 'G10', 'H10']:
-        ws[c].font = font_normal_bold
-        ws[c].border = thin
-        ws[c].alignment = center
+    ws.merge_cells('K9:M9')
+    ws['K9'] = total
+    ws['K9'].font = font_recipient
+    ws['K9'].number_format = '#,##0'
+    ws['K9'].alignment = Alignment(horizontal='right', vertical='center')
 
-    ws.merge_cells('D10:F10')
-    ws['D10'] = col_d_header
-    ws['D10'].font = font_normal_bold
-    ws['D10'].border = thin
-    ws['D10'].alignment = center
+    # === Row 33: 작은 간격 ===
+    ws.row_dimensions[33].height = 4
 
-    ws.merge_cells('I10:J10')
-    ws['I10'] = '단가'
-    ws['I10'].font = font_normal_bold
-    ws['I10'].border = thin
-    ws['I10'].alignment = center
-
-    ws.merge_cells('K10:M10')
-    ws['K10'] = '금 액'
-    ws['K10'].font = font_normal_bold
-    ws['K10'].border = thin
-    ws['K10'].alignment = center
-
-    # Row 33~37: 합계
-    ws.row_dimensions[33].height = 6
+    # === Row 34~36: 비고 + 합계 영역 ===
+    sum_fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
     for r in [34, 35, 36]:
-        ws.row_dimensions[r].height = 22.5
+        ws.row_dimensions[r].height = 24
 
+    # 비고 (3행 병합)
     ws.merge_cells('A34:G36')
-    ws['A34'] = f'비 고 : \n{비고_text}' if 비고_text else '비 고 : '
-    ws['A34'].font = Font(name='Dotum', size=10, bold=True)
-    ws['A34'].alignment = Alignment(vertical='top', wrap_text=True)
-    ws['A34'].border = thin
+    ws['A34'] = '비 고 : \n1) 상세 데이터 별도 제공'
+    ws['A34'].font = font_normal_bold
+    ws['A34'].alignment = Alignment(vertical='top', wrap_text=True, horizontal='left')
+    _set_range_border(ws, 'A34:G36', thin)
 
+    # 공급가
     ws.merge_cells('H34:J34')
     ws['H34'] = '공 급 가'
     ws['H34'].font = font_normal_bold
     ws['H34'].alignment = center
-    ws['H34'].border = thin
+    _set_range_border(ws, 'H34:J34', thin)
+    _fill_range(ws, 'H34:J34', sum_fill)
+
     ws.merge_cells('K34:M34')
-    ws['K34'] = '=SUM(K11:M32)'
+    ws['K34'] = supply
     ws['K34'].font = font_normal_bold
     ws['K34'].alignment = Alignment(horizontal='right', vertical='center')
-    ws['K34'].border = thin
     ws['K34'].number_format = '#,##0'
+    _set_range_border(ws, 'K34:M34', thin)
 
+    # 부가세
     ws.merge_cells('H35:J35')
     ws['H35'] = '부가세'
     ws['H35'].font = font_normal_bold
     ws['H35'].alignment = center
-    ws['H35'].border = thin
+    _set_range_border(ws, 'H35:J35', thin)
+    _fill_range(ws, 'H35:J35', sum_fill)
+
     ws.merge_cells('K35:M35')
-    ws['K35'] = '=K34*10%'
+    ws['K35'] = vat
     ws['K35'].font = font_normal_bold
     ws['K35'].alignment = Alignment(horizontal='right', vertical='center')
-    ws['K35'].border = thin
     ws['K35'].number_format = '#,##0'
+    _set_range_border(ws, 'K35:M35', thin)
 
+    # 합계금액
     ws.merge_cells('H36:J36')
     ws['H36'] = '합 계 금 액'
     ws['H36'].font = font_normal_bold
     ws['H36'].alignment = center
-    ws['H36'].border = thin
+    _set_range_border(ws, 'H36:J36', thin)
+    _fill_range(ws, 'H36:J36', sum_fill)
+
     ws.merge_cells('K36:M36')
-    ws['K36'] = '=SUM(K34:M35)'
-    ws['K36'].font = font_normal_bold
+    ws['K36'] = total
+    ws['K36'].font = Font(name='Dotum', size=11, bold=True)
     ws['K36'].alignment = Alignment(horizontal='right', vertical='center')
-    ws['K36'].border = thin
     ws['K36'].number_format = '#,##0'
+    _set_range_border(ws, 'K36:M36', thin)
 
-    ws.row_dimensions[37].height = 34.5
+    # === Row 37: 입금정보 ===
+    ws.row_dimensions[37].height = 30
     ws.merge_cells('A37:M37')
-    ws['A37'] = f' 입금정보 : {SUPPLIER_INFO["bank"]}'
+    ws['A37'] = f'   입금정보 : {SUPPLIER_INFO["bank"]}'
     ws['A37'].font = font_normal_bold
-    ws['A37'].border = thin
-    ws['A37'].alignment = Alignment(vertical='center')
-
-    for r in range(5, 9):
-        for c in ['D', 'E', 'H', 'K', 'M']:
-            ws[f'{c}{r}'].border = thin
+    ws['A37'].alignment = Alignment(vertical='center', horizontal='left')
+    _set_range_border(ws, 'A37:M37', thin)
 
 
-def _fill_data_row(ws, row_idx, billing_month, agency, col_c, col_d,
-                   qty, rate, unit_price, thin):
-    """데이터 행 한 줄 채우기"""
-    font_small = Font(name='Dotum', size=10, bold=True)
-    font_data = Font(name='Dotum', size=8, bold=True)
+def _draw_data_table_header(ws, col_c_header='요금제', col_d_header='약정'):
+    """Row 10 데이터 테이블 헤더"""
+    thin = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    font_header = Font(name='Dotum', size=10, bold=True)
+    header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    ws.row_dimensions[10].height = 26
+
+    # A: 이용월
+    ws['A10'] = '이용월'
+    ws['A10'].font = font_header
+    ws['A10'].alignment = center
+    ws['A10'].fill = header_fill
+    ws['A10'].border = thin
+
+    # B: 대리점
+    ws['B10'] = '대리점'
+    ws['B10'].font = font_header
+    ws['B10'].alignment = center
+    ws['B10'].fill = header_fill
+    ws['B10'].border = thin
+
+    # C: 요금제 (또는 기관명)
+    ws['C10'] = col_c_header
+    ws['C10'].font = font_header
+    ws['C10'].alignment = center
+    ws['C10'].fill = header_fill
+    ws['C10'].border = thin
+
+    # D-F: 약정 (또는 구분)
+    ws.merge_cells('D10:F10')
+    ws['D10'] = col_d_header
+    ws['D10'].font = font_header
+    ws['D10'].alignment = center
+    _set_range_border(ws, 'D10:F10', thin)
+    _fill_range(ws, 'D10:F10', header_fill)
+
+    # G: 수량
+    ws['G10'] = '수량'
+    ws['G10'].font = font_header
+    ws['G10'].alignment = center
+    ws['G10'].fill = header_fill
+    ws['G10'].border = thin
+
+    # H: 요율
+    ws['H10'] = '요율'
+    ws['H10'].font = font_header
+    ws['H10'].alignment = center
+    ws['H10'].fill = header_fill
+    ws['H10'].border = thin
+
+    # I-J: 단가
+    ws.merge_cells('I10:J10')
+    ws['I10'] = '단가'
+    ws['I10'].font = font_header
+    ws['I10'].alignment = center
+    _set_range_border(ws, 'I10:J10', thin)
+    _fill_range(ws, 'I10:J10', header_fill)
+
+    # K-M: 금 액
+    ws.merge_cells('K10:M10')
+    ws['K10'] = '금 액'
+    ws['K10'].font = font_header
+    ws['K10'].alignment = center
+    _set_range_border(ws, 'K10:M10', thin)
+    _fill_range(ws, 'K10:M10', header_fill)
+
+
+def _draw_data_row(ws, row_idx, billing_month, agency, col_c, col_d,
+                   qty, rate_text, unit_price):
+    """데이터 행 한 줄 그리기 (모든 병합 셀 border 처리)"""
+    thin = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    font_data = Font(name='Dotum', size=10, bold=True)
+    font_data_normal = Font(name='Dotum', size=9)
     font_num = Font(name='Malgun Gothic', size=10)
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     right = Alignment(horizontal='right', vertical='center')
 
-    ws.row_dimensions[row_idx].height = 22.5
+    ws.row_dimensions[row_idx].height = 22
 
+    # A: 이용월
     ws[f'A{row_idx}'] = billing_month
-    ws[f'A{row_idx}'].font = font_small
+    ws[f'A{row_idx}'].font = font_data
     ws[f'A{row_idx}'].alignment = center
     ws[f'A{row_idx}'].border = thin
 
+    # B: 대리점
     ws[f'B{row_idx}'] = agency
-    ws[f'B{row_idx}'].font = font_data
+    ws[f'B{row_idx}'].font = font_data_normal
     ws[f'B{row_idx}'].alignment = center
     ws[f'B{row_idx}'].border = thin
 
+    # C: 카테고리/기관명
     ws[f'C{row_idx}'] = col_c
-    ws[f'C{row_idx}'].font = font_small
+    ws[f'C{row_idx}'].font = font_data
     ws[f'C{row_idx}'].alignment = center
     ws[f'C{row_idx}'].border = thin
 
+    # D-F: 약정/구분
     ws.merge_cells(f'D{row_idx}:F{row_idx}')
     ws[f'D{row_idx}'] = col_d
     ws[f'D{row_idx}'].font = font_data
     ws[f'D{row_idx}'].alignment = center
-    ws[f'D{row_idx}'].border = thin
+    _set_range_border(ws, f'D{row_idx}:F{row_idx}', thin)
 
+    # G: 수량
     ws[f'G{row_idx}'] = qty
-    ws[f'G{row_idx}'].font = font_small
+    ws[f'G{row_idx}'].font = font_data
     ws[f'G{row_idx}'].alignment = center
     ws[f'G{row_idx}'].border = thin
 
-    ws[f'H{row_idx}'] = rate
-    ws[f'H{row_idx}'].font = font_small
+    # H: 요율 (텍스트로)
+    ws[f'H{row_idx}'] = rate_text
+    ws[f'H{row_idx}'].font = font_data
     ws[f'H{row_idx}'].alignment = center
     ws[f'H{row_idx}'].border = thin
-    ws[f'H{row_idx}'].number_format = '0%'
 
+    # I-J: 단가
     ws.merge_cells(f'I{row_idx}:J{row_idx}')
     ws[f'I{row_idx}'] = unit_price
     ws[f'I{row_idx}'].font = font_num
     ws[f'I{row_idx}'].alignment = center
-    ws[f'I{row_idx}'].border = thin
     ws[f'I{row_idx}'].number_format = '#,##0'
+    _set_range_border(ws, f'I{row_idx}:J{row_idx}', thin)
 
+    # K-M: 금액 (계산식)
+    rate_decimal = 1.0 if rate_text == '100%' else 0.5
     ws.merge_cells(f'K{row_idx}:M{row_idx}')
-    ws[f'K{row_idx}'] = f'=I{row_idx}*G{row_idx}*H{row_idx}'
-    ws[f'K{row_idx}'].font = font_small
+    ws[f'K{row_idx}'] = int(unit_price * qty * rate_decimal)
+    ws[f'K{row_idx}'].font = font_data
     ws[f'K{row_idx}'].alignment = right
-    ws[f'K{row_idx}'].border = thin
     ws[f'K{row_idx}'].number_format = '#,##0'
+    _set_range_border(ws, f'K{row_idx}:M{row_idx}', thin)
 
 
-def _fill_empty_rows(ws, start_row, end_row, thin):
+def _draw_empty_row(ws, row_idx):
     """빈 데이터 행 (테두리만)"""
-    for r in range(start_row, end_row + 1):
-        ws.row_dimensions[r].height = 22.5
-        for col in ['A', 'B', 'C', 'G', 'H']:
-            ws[f'{col}{r}'].border = thin
-        ws.merge_cells(f'D{r}:F{r}')
-        ws[f'D{r}'].border = thin
-        ws.merge_cells(f'I{r}:J{r}')
-        ws[f'I{r}'].border = thin
-        ws.merge_cells(f'K{r}:M{r}')
-        ws[f'K{r}'].border = thin
+    thin = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    ws.row_dimensions[row_idx].height = 22
+    for col in ['A', 'B', 'C', 'G', 'H']:
+        ws[f'{col}{row_idx}'].border = thin
+    ws.merge_cells(f'D{row_idx}:F{row_idx}')
+    _set_range_border(ws, f'D{row_idx}:F{row_idx}', thin)
+    ws.merge_cells(f'I{row_idx}:J{row_idx}')
+    _set_range_border(ws, f'I{row_idx}:J{row_idx}', thin)
+    ws.merge_cells(f'K{row_idx}:M{row_idx}')
+    _set_range_border(ws, f'K{row_idx}:M{row_idx}', thin)
 
 
 # ========== 총판 거래명세서 ==========
@@ -599,8 +783,8 @@ def _fill_empty_rows(ws, start_row, end_row, thin):
 def create_invoice_excel(df_raw, recipient_name, billing_month, recipient_info=None,
                           billing_date=None):
     """
-    총판 거래명세서 생성
-    카테고리: 2024_주5회 / 2024_주3회 / 2025_주5회 / 2025_주3회 / 2025_한결프로모션
+    총판 거래명세서 생성 (reference 1월 PDF 양식 기준)
+    카테고리: 2024_주5회 / 2024_주3회 / 2025_주5회 / 2025_주3회 / 2025_한결_주5회 / 2025_한결_주3회
     """
     if recipient_info is None:
         recipient_info = {'address': '', 'biz_no': '', 'email': ''}
@@ -617,21 +801,30 @@ def create_invoice_excel(df_raw, recipient_name, billing_month, recipient_info=N
     ).size().reset_index(name='수량')
     grouped = grouped.sort_values(['sort_order', '요금'], ascending=[True, False])
 
+    # 미리 합계 계산 (수식 대신 값 사용)
+    supply = int(sum(int(g['요금']) * int(g['수량']) for _, g in grouped.iterrows()))
+    vat = int(supply * 0.1)
+    total = supply + vat
+
     wb = Workbook()
     ws = wb.active
     ws.title = '거래명세서'
 
-    thin = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
+    # 열 너비 (총판: C 컬럼 더 좁게, 요금제 카테고리 라벨 길이에 맞춤)
+    col_widths = {'A': 8.86, 'B': 17.57, 'C': 32.0, 'D': 5.43, 'E': 1.86,
+                  'F': 13.0, 'G': 10.71, 'H': 8.86, 'I': 3.14, 'J': 9.0,
+                  'K': 2.14, 'L': 5.14, 'M': 16.43}
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
 
-    _setup_invoice_layout(
-        ws, recipient_name, recipient_info, billing_date,
-        col3_header='요금제', col_d_header='약정',
-        비고_text='1) 상세 데이터 별도 제공'
-    )
+    # 공통 영역 (미리 계산한 합계 전달)
+    _setup_invoice_common(ws, recipient_name, recipient_info, billing_date,
+                          supply=supply, vat=vat, total=total)
 
+    # 데이터 테이블 헤더
+    _draw_data_table_header(ws, col_c_header='요금제', col_d_header='약정')
+
+    # 데이터 행
     data_start = 11
     data_end = 32
     row_idx = data_start
@@ -639,20 +832,26 @@ def create_invoice_excel(df_raw, recipient_name, billing_month, recipient_info=N
     for _, grp in grouped.iterrows():
         if row_idx > data_end:
             break
-        _fill_data_row(
+        _draw_data_row(
             ws, row_idx,
             billing_month=billing_month,
             agency=recipient_name,
             col_c=grp['category'],
             col_d=grp['약정_label'],
             qty=int(grp['수량']),
-            rate=1.0,
-            unit_price=int(grp['요금']),
-            thin=thin
+            rate_text='100%',
+            unit_price=int(grp['요금'])
         )
         row_idx += 1
 
-    _fill_empty_rows(ws, row_idx, data_end, thin)
+    # 빈 행
+    for r in range(row_idx, data_end + 1):
+        _draw_empty_row(ws, r)
+
+    # 외곽선
+    thick = Side(style='medium')
+    _outer_border_range(ws, 'A2:M37', thick)
+
     return wb
 
 
@@ -676,21 +875,30 @@ def create_directory_invoice_excel(df_directory, recipient_name='(주)디렉토�
     ).reset_index()
     grouped = grouped.sort_values('수량', ascending=False)
 
+    # 미리 합계 계산 (50% 요율)
+    supply = int(sum(int(g['요금']) * int(g['수량']) * 0.5 for _, g in grouped.iterrows()))
+    vat = int(supply * 0.1)
+    total = supply + vat
+
     wb = Workbook()
     ws = wb.active
     ws.title = '거래명세서'
 
-    thin = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
+    # 열 너비 (디렉토리: C 컬럼 = 기관명)
+    col_widths = {'A': 8.86, 'B': 13.0, 'C': 25.0, 'D': 5.43, 'E': 1.86,
+                  'F': 13.0, 'G': 10.71, 'H': 8.86, 'I': 3.14, 'J': 9.0,
+                  'K': 2.14, 'L': 5.14, 'M': 16.43}
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
 
-    _setup_invoice_layout(
-        ws, recipient_name, recipient_info, billing_date,
-        col3_header='기관명', col_d_header='구분',
-        비고_text=''
-    )
+    # 공통 영역
+    _setup_invoice_common(ws, recipient_name, recipient_info, billing_date,
+                          supply=supply, vat=vat, total=total)
 
+    # 데이터 테이블 헤더 (기관명 / 구분)
+    _draw_data_table_header(ws, col_c_header='기관명', col_d_header='구분')
+
+    # 데이터 행
     data_start = 11
     data_end = 32
     row_idx = data_start
@@ -698,21 +906,76 @@ def create_directory_invoice_excel(df_directory, recipient_name='(주)디렉토�
     for _, grp in grouped.iterrows():
         if row_idx > data_end:
             break
-        _fill_data_row(
+        _draw_data_row(
             ws, row_idx,
             billing_month=billing_month,
             agency='디렉토리',
             col_c=grp['기관명'],
             col_d='BASIC(3)',
             qty=int(grp['수량']),
-            rate=0.5,
-            unit_price=int(grp['요금']),
-            thin=thin
+            rate_text='50%',
+            unit_price=int(grp['요금'])
         )
         row_idx += 1
 
-    _fill_empty_rows(ws, row_idx, data_end, thin)
+    # 빈 행
+    for r in range(row_idx, data_end + 1):
+        _draw_empty_row(ws, r)
+
+    # 외곽선
+    thick = Side(style='medium')
+    _outer_border_range(ws, 'A2:M37', thick)
+
     return wb
+
+
+# ========== Excel → PDF 변환 ==========
+
+def excel_to_pdf_bytes(wb):
+    """
+    openpyxl Workbook → PDF bytes 변환
+    LibreOffice(soffice)를 사용하여 Excel 파일을 PDF로 변환합니다.
+    Streamlit Cloud에서 사용하려면 packages.txt에 libreoffice 추가 필요.
+    """
+    import subprocess
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        xlsx_path = os.path.join(tmpdir, 'invoice.xlsx')
+        pdf_path = os.path.join(tmpdir, 'invoice.pdf')
+        wb.save(xlsx_path)
+
+        # LibreOffice가 설치된 경로 찾기
+        soffice_cmd = None
+        for cmd in ['soffice', 'libreoffice', '/usr/bin/soffice', '/usr/bin/libreoffice']:
+            try:
+                result = subprocess.run(
+                    [cmd, '--version'],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    soffice_cmd = cmd
+                    break
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+
+        if not soffice_cmd:
+            return None  # LibreOffice 없음
+
+        try:
+            subprocess.run(
+                [soffice_cmd, '--headless', '--convert-to', 'pdf',
+                 '--outdir', tmpdir, xlsx_path],
+                capture_output=True, timeout=60, check=True
+            )
+            if os.path.exists(pdf_path):
+                with open(pdf_path, 'rb') as f:
+                    return f.read()
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            return None
+
+    return None
 
 
 # ========== 별도 제공자료 ==========

@@ -13,7 +13,7 @@ from billing_logic import (
     split_by_directory, create_invoice_excel, create_directory_invoice_excel,
     create_summary_sheet, create_detail_excel,
     check_plan_consistency, check_issue_list_excluded,
-    classify_plan, SUPPLIER_INFO
+    classify_plan, SUPPLIER_INFO, excel_to_pdf_bytes
 )
 from invoice_pdf import create_invoice_pdf, create_directory_invoice_pdf
 
@@ -484,7 +484,7 @@ with tab2:
             if "총판" in invoice_type or "둘" in invoice_type:
                 wh_info = {'address': wh_address, 'biz_no': wh_biz_no, 'email': wh_email}
 
-                # Excel
+                # Excel (도장 포함, 미리 계산된 값)
                 wb_wh = create_invoice_excel(
                     df_wholesale, recipient_name=wh_recipient,
                     billing_month=billing_month_str,
@@ -496,13 +496,18 @@ with tab2:
                 buf.seek(0)
                 outputs['총판 거래명세서 (Excel)'] = ('xlsx', buf)
 
-                # PDF (도장 포함)
-                pdf_wh = create_invoice_pdf(
-                    df_wholesale, recipient_name=wh_recipient,
-                    billing_month=billing_month_str,
-                    recipient_info=wh_info
-                )
-                outputs['총판 거래명세서 (PDF, 도장)'] = ('pdf', pdf_wh)
+                # PDF: Excel → PDF 변환 시도 (LibreOffice 사용)
+                pdf_bytes = excel_to_pdf_bytes(wb_wh)
+                if pdf_bytes:
+                    outputs['총판 거래명세서 (PDF)'] = ('pdf', BytesIO(pdf_bytes))
+                else:
+                    # LibreOffice 미설치 시 fallback: reportlab PDF
+                    pdf_wh = create_invoice_pdf(
+                        df_wholesale, recipient_name=wh_recipient,
+                        billing_month=billing_month_str,
+                        recipient_info=wh_info
+                    )
+                    outputs['총판 거래명세서 (PDF)'] = ('pdf', pdf_wh)
 
                 # 별도 제공자료
                 detail_wb = create_detail_excel(df_wholesale, billing_month_str)
@@ -515,7 +520,7 @@ with tab2:
             if "디렉토리" in invoice_type or "둘" in invoice_type:
                 dir_info = {'address': dir_address, 'biz_no': dir_biz_no, 'email': dir_email}
 
-                # Excel
+                # Excel (도장 포함)
                 wb_dir = create_directory_invoice_excel(
                     df_directory, recipient_name=dir_recipient,
                     billing_month=billing_month_str,
@@ -527,13 +532,18 @@ with tab2:
                 buf.seek(0)
                 outputs['디렉토리 거래명세서 (Excel)'] = ('xlsx', buf)
 
-                # PDF (도장 포함)
-                pdf_dir = create_directory_invoice_pdf(
-                    df_directory, recipient_name=dir_recipient,
-                    billing_month=billing_month_str,
-                    recipient_info=dir_info
-                )
-                outputs['디렉토리 거래명세서 (PDF, 도장)'] = ('pdf', pdf_dir)
+                # PDF: Excel → PDF 변환 시도
+                pdf_bytes = excel_to_pdf_bytes(wb_dir)
+                if pdf_bytes:
+                    outputs['디렉토리 거래명세서 (PDF)'] = ('pdf', BytesIO(pdf_bytes))
+                else:
+                    # Fallback
+                    pdf_dir = create_directory_invoice_pdf(
+                        df_directory, recipient_name=dir_recipient,
+                        billing_month=billing_month_str,
+                        recipient_info=dir_info
+                    )
+                    outputs['디렉토리 거래명세서 (PDF)'] = ('pdf', pdf_dir)
 
             # ===== 결과 표시 =====
             st.divider()
