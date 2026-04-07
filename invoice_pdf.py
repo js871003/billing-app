@@ -49,37 +49,44 @@ SUPPLIER = {
 
 def _categorize_row(row):
     """
-    거래명세서 카테고리 분류 (가격 기반)
+    거래명세서 카테고리 분류.
+    우선순위: contract_year → 가격 + 담당지사 추정
     Returns: (category, 약정_label, sort_order)
     """
-    contract_year = row.get('contract_year', '')
-    price = row.get('요금', 0)
-    jisa = row.get('담당지사', '')
+    price = int(row.get('요금', 0) or 0)
+    jisa = str(row.get('담당지사', '') or '').strip()
+    contract_year = str(row.get('contract_year', '') or '').strip()
 
-    if contract_year == '디렉토리':
+    if price == 72000 or contract_year == '디렉토리':
         return ('디렉토리', 'BASIC(3)', 999)
 
-    # 2024 계약
-    if contract_year == '2024':
-        if price == 60000:
-            return ('2024_주5회', '1년', 1)
-        elif price == 54000:
-            return ('2024_주5회', '3년', 2)
-        elif price == 48000:
-            return ('2024_주3회', '1년', 3)
-        elif price == 43200:
-            return ('2024_주3회', '3년', 4)
+    if price == 54000:
+        return ('2024_주5회', '3년', 2)
+    if price == 43200:
+        return ('2024_주3회', '3년', 4)
 
-    # 2025 계약 - 약정 모두 3년
-    if contract_year == '2025':
-        if jisa == '한결교육' and price == 60000:
+    if price == 95000:
+        return ('2025_주5회', '3년', 5)
+    if price == 83000:
+        return ('2025_주3회', '3년', 6)
+
+    if price == 60000:
+        if contract_year == '2025':
             return ('2025_한결_주5회', '3년', 7)
-        if jisa == '한결교육' and price == 48000:
+        if contract_year == '2024':
+            return ('2024_주5회', '1년', 1)
+        if jisa == '한결교육':
+            return ('2025_한결_주5회', '3년', 7)
+        return ('2024_주5회', '1년', 1)
+
+    if price == 48000:
+        if contract_year == '2025':
             return ('2025_한결_주3회', '3년', 8)
-        if price == 95000:
-            return ('2025_주5회', '3년', 5)
-        if price == 83000:
-            return ('2025_주3회', '3년', 6)
+        if contract_year == '2024':
+            return ('2024_주3회', '1년', 3)
+        if jisa == '한결교육':
+            return ('2025_한결_주3회', '3년', 8)
+        return ('2024_주3회', '1년', 3)
 
     return ('기타', '', 999)
 

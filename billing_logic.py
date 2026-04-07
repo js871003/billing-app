@@ -128,42 +128,62 @@ def classify_plan(plan_str):
 
 def categorize_for_invoice(row):
     """
-    각 행을 거래명세서 카테고리로 분류 (가격 기반).
+    각 행을 거래명세서 카테고리로 분류.
     
-    - 2024 (28.02 계약): 60000=주5회/1년, 54000=주5회/3년, 48000=주3회/1년, 43200=주3회/3년
-    - 2025 (29.02 계약): 95000=주5회/3년, 83000=주3회/3년 (모든 2025 약정은 3년)
-    - 2025 한결 프로모션: 60000=한결_주5회/3년, 48000=한결_주3회/3년
+    우선순위:
+    1. contract_year가 명확히 있으면 그것을 신뢰
+    2. 없으면 가격 + 담당지사로 추정
+    
+    가격별 분류 규칙:
+    - 72,000원 → 디렉토리 (고유)
+    - 54,000원 → 2024_주5회/3년 (고유)
+    - 43,200원 → 2024_주3회/3년 (고유)
+    - 95,000원 → 2025_주5회/3년 (고유)
+    - 83,000원 → 2025_주3회/3년 (고유)
+    - 60,000원 → 2024인지 2025 한결프로모션인지는 contract_year/담당지사로 구분
+    - 48,000원 → 2024인지 2025 한결프로모션인지는 contract_year/담당지사로 구분
     """
-    contract_year = row.get('contract_year', '')
-    price = row.get('요금', 0)
-    jisa = row.get('담당지사', '')
+    price = int(row.get('요금', 0) or 0)
+    jisa = str(row.get('담당지사', '') or '').strip()
+    contract_year = str(row.get('contract_year', '') or '').strip()
 
-    if contract_year == '디렉토리':
+    # 디렉토리 (72,000원 고유)
+    if price == 72000 or contract_year == '디렉토리':
         return {'category': '디렉토리', '약정': 'BASIC(3)', 'sort_order': 999}
 
-    # 2024 계약 (28.02 종료)
-    if contract_year == '2024':
-        if price == 60000:
-            return {'category': '2024_주5회', '약정': '1년', 'sort_order': 1}
-        elif price == 54000:
-            return {'category': '2024_주5회', '약정': '3년', 'sort_order': 2}
-        elif price == 48000:
-            return {'category': '2024_주3회', '약정': '1년', 'sort_order': 3}
-        elif price == 43200:
-            return {'category': '2024_주3회', '약정': '3년', 'sort_order': 4}
+    # 2024 고유 가격
+    if price == 54000:
+        return {'category': '2024_주5회', '약정': '3년', 'sort_order': 2}
+    if price == 43200:
+        return {'category': '2024_주3회', '약정': '3년', 'sort_order': 4}
 
-    # 2025 계약 (29.02 종료) - 약정 모두 3년
-    if contract_year == '2025':
-        # 한결교육 프로모션 (할인가)
-        if jisa == '한결교육' and price == 60000:
+    # 2025 고유 가격
+    if price == 95000:
+        return {'category': '2025_주5회', '약정': '3년', 'sort_order': 5}
+    if price == 83000:
+        return {'category': '2025_주3회', '약정': '3년', 'sort_order': 6}
+
+    # 60,000원: contract_year 우선, 없으면 담당지사로 추정
+    if price == 60000:
+        if contract_year == '2025':
             return {'category': '2025_한결_주5회', '약정': '3년', 'sort_order': 7}
-        if jisa == '한결교육' and price == 48000:
+        if contract_year == '2024':
+            return {'category': '2024_주5회', '약정': '1년', 'sort_order': 1}
+        # contract_year 없음 → 담당지사로 추정
+        if jisa == '한결교육':
+            return {'category': '2025_한결_주5회', '약정': '3년', 'sort_order': 7}
+        return {'category': '2024_주5회', '약정': '1년', 'sort_order': 1}
+
+    # 48,000원: contract_year 우선, 없으면 담당지사로 추정
+    if price == 48000:
+        if contract_year == '2025':
             return {'category': '2025_한결_주3회', '약정': '3년', 'sort_order': 8}
-        # 정상가
-        if price == 95000:
-            return {'category': '2025_주5회', '약정': '3년', 'sort_order': 5}
-        if price == 83000:
-            return {'category': '2025_주3회', '약정': '3년', 'sort_order': 6}
+        if contract_year == '2024':
+            return {'category': '2024_주3회', '약정': '1년', 'sort_order': 3}
+        # contract_year 없음 → 담당지사로 추정
+        if jisa == '한결교육':
+            return {'category': '2025_한결_주3회', '약정': '3년', 'sort_order': 8}
+        return {'category': '2024_주3회', '약정': '1년', 'sort_order': 3}
 
     return {'category': '기타', '약정': '', 'sort_order': 999}
 
