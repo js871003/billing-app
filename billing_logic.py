@@ -366,10 +366,10 @@ def _setup_invoice_common(ws, recipient_name, recipient_info, billing_date,
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
-    font_title = Font(name='Dotum', size=22, bold=True)
-    font_normal = Font(name='Dotum', size=10)
-    font_normal_bold = Font(name='Dotum', size=10, bold=True)
-    font_recipient = Font(name='Dotum', size=12, bold=True)
+    font_title = Font(name='NanumGothic', size=22, bold=True)
+    font_normal = Font(name='NanumGothic', size=10)
+    font_normal_bold = Font(name='NanumGothic', size=10, bold=True)
+    font_recipient = Font(name='NanumGothic', size=12, bold=True)
     header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
 
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -605,7 +605,7 @@ def _setup_invoice_common(ws, recipient_name, recipient_info, billing_date,
 
     ws.merge_cells('K36:M36')
     ws['K36'] = total
-    ws['K36'].font = Font(name='Dotum', size=11, bold=True)
+    ws['K36'].font = Font(name='NanumGothic', size=11, bold=True)
     ws['K36'].alignment = Alignment(horizontal='right', vertical='center')
     ws['K36'].number_format = '#,##0'
     _set_range_border(ws, 'K36:M36', thin)
@@ -625,7 +625,7 @@ def _draw_data_table_header(ws, col_c_header='요금제', col_d_header='약정')
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
-    font_header = Font(name='Dotum', size=10, bold=True)
+    font_header = Font(name='NanumGothic', size=10, bold=True)
     header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
@@ -698,9 +698,9 @@ def _draw_data_row(ws, row_idx, billing_month, agency, col_c, col_d,
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
-    font_data = Font(name='Dotum', size=10, bold=True)
-    font_data_normal = Font(name='Dotum', size=9)
-    font_num = Font(name='Malgun Gothic', size=10)
+    font_data = Font(name='NanumGothic', size=10, bold=True)
+    font_data_normal = Font(name='NanumGothic', size=9)
+    font_num = Font(name='NanumGothic', size=10)
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     right = Alignment(horizontal='right', vertical='center')
 
@@ -1022,8 +1022,8 @@ def create_detail_excel(df_raw, billing_month):
     pivot = pivot[['주3회', '주5회', 'Grand Total']]
     pivot = pivot.sort_index()
 
-    header_font = Font(name='Dotum', size=11, bold=True)
-    data_font = Font(name='Dotum', size=10)
+    header_font = Font(name='NanumGothic', size=11, bold=True)
+    data_font = Font(name='NanumGothic', size=10)
     num_fmt = '#,##0'
     thin = Border(
         left=Side(style='thin'), right=Side(style='thin'),
