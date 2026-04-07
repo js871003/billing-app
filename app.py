@@ -13,7 +13,7 @@ from billing_logic import (
     split_by_directory, create_invoice_excel, create_directory_invoice_excel,
     create_summary_sheet, create_detail_excel,
     check_plan_consistency, check_issue_list_excluded,
-    classify_plan, SUPPLIER_INFO, excel_to_pdf_bytes
+    classify_plan, SUPPLIER_INFO
 )
 from invoice_pdf import create_invoice_pdf, create_directory_invoice_pdf
 
@@ -496,18 +496,13 @@ with tab2:
                 buf.seek(0)
                 outputs['총판 거래명세서 (Excel)'] = ('xlsx', buf)
 
-                # PDF: Excel → PDF 변환 시도 (LibreOffice 사용)
-                pdf_bytes = excel_to_pdf_bytes(wb_wh)
-                if pdf_bytes:
-                    outputs['총판 거래명세서 (PDF)'] = ('pdf', BytesIO(pdf_bytes))
-                else:
-                    # LibreOffice 미설치 시 fallback: reportlab PDF
-                    pdf_wh = create_invoice_pdf(
-                        df_wholesale, recipient_name=wh_recipient,
-                        billing_month=billing_month_str,
-                        recipient_info=wh_info
-                    )
-                    outputs['총판 거래명세서 (PDF)'] = ('pdf', pdf_wh)
+                # PDF: reportlab 기반 (도장 포함)
+                pdf_wh = create_invoice_pdf(
+                    df_wholesale, recipient_name=wh_recipient,
+                    billing_month=billing_month_str,
+                    recipient_info=wh_info
+                )
+                outputs['총판 거래명세서 (PDF)'] = ('pdf', pdf_wh)
 
                 # 별도 제공자료
                 detail_wb = create_detail_excel(df_wholesale, billing_month_str)
@@ -532,18 +527,13 @@ with tab2:
                 buf.seek(0)
                 outputs['디렉토리 거래명세서 (Excel)'] = ('xlsx', buf)
 
-                # PDF: Excel → PDF 변환 시도
-                pdf_bytes = excel_to_pdf_bytes(wb_dir)
-                if pdf_bytes:
-                    outputs['디렉토리 거래명세서 (PDF)'] = ('pdf', BytesIO(pdf_bytes))
-                else:
-                    # Fallback
-                    pdf_dir = create_directory_invoice_pdf(
-                        df_directory, recipient_name=dir_recipient,
-                        billing_month=billing_month_str,
-                        recipient_info=dir_info
-                    )
-                    outputs['디렉토리 거래명세서 (PDF)'] = ('pdf', pdf_dir)
+                # PDF: reportlab 기반 (도장 포함)
+                pdf_dir = create_directory_invoice_pdf(
+                    df_directory, recipient_name=dir_recipient,
+                    billing_month=billing_month_str,
+                    recipient_info=dir_info
+                )
+                outputs['디렉토리 거래명세서 (PDF)'] = ('pdf', pdf_dir)
 
             # ===== 결과 표시 =====
             st.divider()
